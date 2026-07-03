@@ -33,7 +33,6 @@ function formatDeadline(deadline: string) {
   });
 }
 
-export function CreateProposalModal({ walletAddress, onClose, onSubmitted }: Props) {
 export function CreateProposalModal({ walletAddress, onClose, onSubmitted, triggerRef }: Props) {
   const defaultDeadline = () => {
     const d = new Date();
@@ -50,7 +49,7 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
   const [step, setStep] = useState<ProposalStep>("form");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [feeEstimate, setFeeEstimate] = useState<number | null>(null);
   const [feeLoading, setFeeLoading] = useState(false);
   const [feeError, setFeeError] = useState(false);
@@ -303,56 +302,6 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
                 />
                 {recipientTouched && !StrKey.isValidEd25519PublicKey(to.trim()) && (
                   <p className="text-xs text-red-400 mt-1">Enter a valid Stellar address</p>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1.5">
-              Description
-            </label>
-            <input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              maxLength={MAX_DESCRIPTION_LEN}
-              placeholder="What is this payment for?"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
-            />
-            <p
-              className={`mt-1 text-right text-xs ${
-                description.length >= MAX_DESCRIPTION_LEN
-                  ? "text-red-400"
-                  : "text-zinc-500"
-              }`}
-            >
-              {description.length} / {MAX_DESCRIPTION_LEN}
-            </p>
-          </div>
-
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1.5">
-              Deadline
-            </label>
-            <input
-              type="date"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
-            />
-          </div>
-
-          {canCalculateFee && (
-            <div className="flex items-center justify-between bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50">
-              <div className="text-sm">
-                {feeLoading ? (
-                  <span className="text-zinc-400">Estimating fee…</span>
-                ) : feeError ? (
-                  <span className="text-red-400">Could not estimate fee</span>
-                ) : feeEstimate !== null ? (
-                  <span className="text-zinc-300">
-                    Estimated fee: <span className="text-white font-mono">~{feeEstimate.toFixed(7)} XLM</span>
-                  </span>
-                ) : (
-                  <span className="text-zinc-500">No estimate yet</span>
                 )}
               </div>
 
@@ -402,9 +351,19 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
                 <input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  maxLength={MAX_DESCRIPTION_LEN}
                   placeholder="What is this payment for?"
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
                 />
+                <p
+                  className={`mt-1 text-right text-xs ${
+                    description.length >= MAX_DESCRIPTION_LEN
+                      ? "text-red-400"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {description.length} / {MAX_DESCRIPTION_LEN}
+                </p>
               </div>
 
               <div>

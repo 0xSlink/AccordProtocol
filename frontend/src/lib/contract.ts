@@ -235,8 +235,8 @@ async function simulateContractView(
 }
 
 export async function getContractXlmBalance(): Promise<string> {
-  const account = await server.getAccount(CONTRACT_ID);
-  const stroops = BigInt(account.balance);
+  const entry = await server.getAccountEntry(CONTRACT_ID);
+  const stroops = BigInt(entry.balance().toString());
   return stroopsToDisplay(stroops);
 }
 

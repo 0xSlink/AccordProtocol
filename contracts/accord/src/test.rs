@@ -3,6 +3,7 @@
 extern crate std;
 
 use super::*;
+use proptest::prelude::*;
 use soroban_sdk::testutils::{Address as _, Events, Ledger as _};
 use soroban_sdk::{
     symbol_short, token, xdr, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Vec,
@@ -510,11 +511,7 @@ fn approve_returns_arithmetic_error_on_overflow() {
         deadline: DEADLINE,
         approvals: u32::MAX,
         status: ProposalStatus::Pending,
-        kind: ProposalKind::Transfer(
-            Address::generate(&env),
-            1_000_000_i128,
-            token_client.address,
-        ),
+        kind: ProposalKind::Transfer(t(&env, &Address::generate(&env), 1_000_000_i128, &token_client.address)),
         ready_at: 0,
         threshold: 2,
         category: ProposalCategory::Transfer,
@@ -1303,18 +1300,14 @@ fn active_count_stays_accurate_after_expire() {
     // Create 2 proposals with a short deadline
     client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "Short 1"),
         &short_deadline,
         &ProposalCategory::Transfer,
     );
     client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "Short 2"),
         &short_deadline,
         &ProposalCategory::Transfer,
@@ -1324,9 +1317,7 @@ fn active_count_stays_accurate_after_expire() {
     for _ in 2..50 {
         client.create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Long"),
             &long_deadline,
             &ProposalCategory::Transfer,
@@ -1337,9 +1328,7 @@ fn active_count_stays_accurate_after_expire() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Overflow"),
             &long_deadline,
             &ProposalCategory::Transfer
@@ -1365,18 +1354,14 @@ fn active_count_stays_accurate_after_expire() {
     // Now we should be able to create 2 more proposals
     let id51 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "New 1"),
         &long_deadline,
         &ProposalCategory::Transfer,
     );
     let id52 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "New 2"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -1388,9 +1373,7 @@ fn active_count_stays_accurate_after_expire() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Overflow 2"),
             &long_deadline,
             &ProposalCategory::Transfer
@@ -1410,9 +1393,7 @@ fn active_count_stays_accurate_mixed() {
     // Create 1 short deadline
     client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "Short 1"),
         &short_deadline,
         &ProposalCategory::Transfer,
@@ -1422,9 +1403,7 @@ fn active_count_stays_accurate_mixed() {
     for _ in 1..50 {
         client.create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Long"),
             &long_deadline,
             &ProposalCategory::Transfer,
@@ -1435,9 +1414,7 @@ fn active_count_stays_accurate_mixed() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Overflow"),
             &long_deadline,
             &ProposalCategory::Transfer
@@ -1454,9 +1431,7 @@ fn active_count_stays_accurate_mixed() {
     // Create 1 new proposal (long deadline)
     let id51 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "New 1"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -1476,9 +1451,7 @@ fn active_count_stays_accurate_mixed() {
     // Create 1 new proposal (long deadline)
     let id52 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "New 2"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -1489,9 +1462,7 @@ fn active_count_stays_accurate_mixed() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "Overflow 2"),
             &long_deadline,
             &ProposalCategory::Transfer
@@ -1509,18 +1480,14 @@ fn cancel_expired_sweeps_two_expired_proposals() {
 
     let id1 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "p1"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
     let id2 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "p2"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1546,18 +1513,14 @@ fn cancel_expired_skips_non_expired_proposal() {
 
     let id1 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "short"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
     let id2 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "long"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -1581,9 +1544,7 @@ fn cancel_expired_skips_nonexistent_id() {
 
     let id1 = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "real"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1606,9 +1567,7 @@ fn cancel_expired_rejects_non_owner() {
 
     client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "x"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1633,9 +1592,7 @@ fn cancel_expired_unblocks_active_cap() {
     for _ in 0..50 {
         client.create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "fill"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -1645,9 +1602,7 @@ fn cancel_expired_unblocks_active_cap() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &recipient,
-            &1_000_000_i128,
-            &token_client.address,
+            &t(&env, &recipient, 1_000_000_i128, &token_client.address),
             &str(&env, "over"),
             &DEADLINE,
             &ProposalCategory::Transfer
@@ -1666,9 +1621,7 @@ fn cancel_expired_unblocks_active_cap() {
 
     let new_id = client.create_proposal(
         &owner_a,
-        &recipient,
-        &1_000_000_i128,
-        &token_client.address,
+        &t(&env, &recipient, 1_000_000_i128, &token_client.address),
         &str(&env, "new"),
         &(DEADLINE + 86_400),
         &ProposalCategory::Transfer,

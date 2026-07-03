@@ -693,6 +693,7 @@ impl AccordContract {
                 proposer,
                 threshold,
                 category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
             },
         );
 
@@ -765,6 +766,7 @@ impl AccordContract {
                 proposer,
                 threshold,
                 category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
             },
         );
 
@@ -852,6 +854,7 @@ impl AccordContract {
                 proposer,
                 threshold,
                 category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
             },
         );
 
@@ -927,6 +930,7 @@ impl AccordContract {
                 proposer,
                 threshold,
                 category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
             },
         );
 
