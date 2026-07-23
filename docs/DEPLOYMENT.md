@@ -181,6 +181,8 @@ If the live hash does not match the manifest for the claimed commit, do not trea
 
 The contract supports in-place upgrades through a two-step WASM upload and upgrade flow. Only an existing owner may call the `upgrade` function. All on-chain storage (proposals, owners, threshold) is preserved after a successful upgrade.
 
+Before approving or executing an upgrade, follow [`docs/UPGRADE_SAFETY.md`](./UPGRADE_SAFETY.md) for WASM hash verification, owner coordination, post-upgrade validation, and red flags.
+
 **Step 1 — Upload the new WASM and obtain the WASM hash:**
 
 ```bash
