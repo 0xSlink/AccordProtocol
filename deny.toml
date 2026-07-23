@@ -1,16 +1,19 @@
 # Config for cargo-deny
+#
+# Advisories: newer cargo-deny versions removed vulnerability/notice lint
+# levels. unmaintained/unsound now select which crates can fail the check
+# (all | workspace | transitive | none), not warn/deny/allow.
 
 [advisories]
-db-path = "~/.cargo-advisories"
+db-path = "~/.cargo/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
-unsound = "warn"
-notice = "warn"
+# Match previous "warn" intent: do not fail CI on unmaintained/unsound crates.
+unmaintained = "none"
+unsound = "none"
+yanked = "warn"
 
 [licenses]
-unlicensed = "deny"
-default = "warn"
+# Licenses not listed here are denied by default in current cargo-deny.
 allow = [
     "MIT",
     "Apache-2.0",
