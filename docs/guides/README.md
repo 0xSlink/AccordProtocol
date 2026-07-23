@@ -9,4 +9,5 @@ Beginner-friendly guides for using Accord Protocol.
 | [Setting Up a Team Multisig](team-multisig.md) | Initialize a 3-of-5 multisig, choose a threshold, and submit your first proposal |
 | [Payroll Multisig](payroll-multisig.md) | Pay contributors monthly in USDC through a 2-of-3 multisig |
 | [Grant Management](grant-management.md) | Disburse USDC grants through a multisig with a grants committee |
+| [Monitoring Your Multisig](monitoring-your-multisig.md) | Query Horizon events, spot missed executions, and verify state after an upgrade |
 | [Troubleshooting](troubleshooting.md) | Diagnose wallet, transaction, and network errors |
