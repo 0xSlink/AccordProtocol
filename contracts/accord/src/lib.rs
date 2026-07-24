@@ -63,7 +63,7 @@ pub struct Proposal {
     pub status: ProposalStatus,
     pub kind: ProposalKind,
     pub ready_at: u64,
-    pub threshold: u32,
+    pub quorum_weight: u32,
     pub category: ProposalCategory,
 }
 
@@ -161,6 +161,8 @@ pub enum ContractError {
     ContractFrozen = 26,
     NoGuardian = 27,
     SpendingLimitExceeded = 28,
+    InvalidWeight = 29,
+    InvalidWeightsLength = 30,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -207,6 +209,15 @@ fn frozen_key() -> Symbol {
 
 fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
     (symbol_short!("SLIMIT"), owner.clone(), token.clone())
+}
+
+
+fn total_weight_key() -> Symbol {
+    symbol_short!("TWEIGHT")
+}
+
+fn owner_weight_key(owner: &Address) -> (Symbol, Address) {
+    (symbol_short!("OWEIGHT"), owner.clone())
 }
 
 // ─── TTL Constants ───────────────────────────────────────────────────────────
@@ -262,6 +273,12 @@ const MAX_OWNERS: u32 = 20;
 /// Maximum proposal lifetime: 90 days.
 const MAX_PROPOSAL_DURATION: u64 = 7_776_000;
 
+/// Minimum owner weight.
+const MIN_OWNER_WEIGHT: u32 = 1;
+/// Maximum owner weight.
+const MAX_OWNER_WEIGHT: u32 = 100_000;
+
+
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
 fn is_initialized(env: &Env) -> bool {
@@ -288,6 +305,31 @@ fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
     bump_persistent(env, &key);
     Ok(owners)
 }
+
+fn read_total_weight(env: &Env) -> u32 {
+    env.storage().instance().get(&total_weight_key()).unwrap_or(0)
+}
+
+fn write_total_weight(env: &Env, weight: u32) {
+    env.storage().instance().set(&total_weight_key(), &weight);
+    bump_instance(env);
+}
+
+fn read_owner_weight(env: &Env, owner: &Address) -> u32 {
+    let key = owner_weight_key(owner);
+    let weight = env.storage().persistent().get(&key).unwrap_or(MIN_OWNER_WEIGHT);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    weight
+}
+
+fn write_owner_weight(env: &Env, owner: &Address, weight: u32) {
+    let key = owner_weight_key(owner);
+    env.storage().persistent().set(&key, &weight);
+    bump_persistent(env, &key);
+}
+
 
 fn read_next_id(env: &Env) -> u64 {
     let id = env
@@ -430,7 +472,7 @@ fn derive_status(env: &Env, proposal: &Proposal) -> ProposalStatus {
     if now > proposal.deadline {
         return ProposalStatus::Expired;
     }
-    if proposal.approvals >= proposal.threshold {
+    if proposal.approvals >= proposal.quorum_weight {
         ProposalStatus::Ready
     } else {
         ProposalStatus::Pending
@@ -465,6 +507,7 @@ impl AccordContract {
     pub fn initialize(
         env: Env,
         owners: Vec<Address>,
+        weights: Vec<u32>,
         threshold: u32,
         time_lock_delay: u64,
     ) -> Result<(), ContractError> {
@@ -480,6 +523,11 @@ impl AccordContract {
             return Err(ContractError::InvalidThreshold);
         }
 
+        if owners.len() != weights.len() {
+            return Err(ContractError::InvalidWeightsLength);
+        }
+
+        let mut total_weight: u32 = 0;
         // Reject duplicate addresses before requiring auth (duplicate require_auth aborts host).
         for i in 0..owners.len() {
             for j in (i + 1)..owners.len() {
@@ -489,10 +537,20 @@ impl AccordContract {
             }
         }
 
-        // Require auth from all owners — they must all consent to being part of this multisig.
-        for owner in owners.iter() {
+        // Require auth from all owners and validate/store weights.
+        for i in 0..owners.len() {
+            let owner = owners.get(i).unwrap();
+            let weight = weights.get(i).unwrap();
+            if weight < MIN_OWNER_WEIGHT || weight > MAX_OWNER_WEIGHT {
+                return Err(ContractError::InvalidWeight);
+            }
             owner.require_auth();
+            if weight != MIN_OWNER_WEIGHT {
+                write_owner_weight(&env, &owner, weight);
+            }
+            total_weight = total_weight.checked_add(weight).ok_or(ContractError::ArithmeticError)?;
         }
+        write_total_weight(&env, total_weight);
 
         let key = owners_key();
         env.storage().persistent().set(&key, &owners);
@@ -603,7 +661,7 @@ impl AccordContract {
             status: ProposalStatus::Pending,
             kind: ProposalKind::Transfer(transfers.clone()),
             ready_at: 0,
-            threshold,
+            quorum_weight: threshold,
             category: category.clone(),
         };
         write_proposal(&env, &proposal);
@@ -680,7 +738,7 @@ impl AccordContract {
             status: ProposalStatus::Pending,
             kind: ProposalKind::AddOwner(new_owner),
             ready_at: 0,
-            threshold,
+            quorum_weight: threshold,
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
@@ -753,7 +811,7 @@ impl AccordContract {
             status: ProposalStatus::Pending,
             kind: ProposalKind::SetSpendingLimit(owner, token, limit),
             ready_at: 0,
-            threshold,
+            quorum_weight: threshold,
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
@@ -841,7 +899,7 @@ impl AccordContract {
             status: ProposalStatus::Pending,
             kind: ProposalKind::RemoveOwner(owner_to_remove),
             ready_at: 0,
-            threshold,
+            quorum_weight: threshold,
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
@@ -917,7 +975,7 @@ impl AccordContract {
             status: ProposalStatus::Pending,
             kind: ProposalKind::ChangeThreshold(new_threshold),
             ready_at: 0,
-            threshold,
+            quorum_weight: threshold,
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
@@ -969,7 +1027,7 @@ impl AccordContract {
             .ok_or(ContractError::ArithmeticError)?;
 
         // Record the timestamp when the proposal first crosses the threshold.
-        if proposal.ready_at == 0 && proposal.approvals >= proposal.threshold {
+        if proposal.ready_at == 0 && proposal.approvals >= proposal.quorum_weight {
             proposal.ready_at = env.ledger().timestamp();
         }
 
@@ -982,7 +1040,7 @@ impl AccordContract {
                 id: proposal_id,
                 approver,
                 approvals: proposal.approvals,
-                threshold: proposal.threshold,
+                threshold: proposal.quorum_weight,
             },
         );
 
@@ -1059,7 +1117,7 @@ impl AccordContract {
         }
 
         if !matches!(proposal.status, ProposalStatus::Ready) {
-            if proposal.approvals < proposal.threshold {
+            if proposal.approvals < proposal.quorum_weight {
                 return Err(ContractError::ThresholdNotMet);
             }
             return Err(ContractError::ProposalNotActive);
@@ -1104,6 +1162,18 @@ impl AccordContract {
                 let key = owners_key();
                 env.storage().persistent().set(&key, &new_owners);
                 bump_persistent(&env, &key);
+
+                let weight = read_owner_weight(&env, owner_to_remove);
+                let current_total = read_total_weight(&env);
+                write_total_weight(
+                    &env,
+                    current_total
+                        .checked_sub(weight)
+                        .ok_or(ContractError::ArithmeticError)?,
+                );
+                env.storage()
+                    .persistent()
+                    .remove(&owner_weight_key(owner_to_remove));
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
                 env.storage()
@@ -1197,6 +1267,10 @@ impl AccordContract {
     /// that need to know which version of the contract is deployed.
     pub fn get_version(_env: Env) -> u32 {
         CONTRACT_VERSION
+    }
+
+    pub fn get_total_weight(env: Env) -> u32 {
+        read_total_weight(&env)
     }
 
     /// Returns the current state of a proposal with a derived status.
