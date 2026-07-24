@@ -1,7 +1,10 @@
 export type ProposalStatus = "pending" | "ready" | "executed" | "expired" | "revoked";
 
+export type ProposalKind = "transfer" | "add_owner" | "remove_owner" | "change_threshold" | "set_spending_limit";
+
 export type Proposal = {
   id: number;
+  kind: ProposalKind;
   to: string;
   amount: string;
   token: string;

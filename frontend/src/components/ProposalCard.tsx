@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { Proposal } from "../types/accord";
+import type { Proposal, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
 import { StatusBadge } from "./StatusBadge";
 import { Check, Copy, Link2 } from "lucide-react";
@@ -12,6 +12,104 @@ type ProposalCardProps = {
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
 };
+
+const KIND_LABELS: Record<ProposalKind, { title: string; badge: string }> = {
+  transfer: { title: "Send", badge: "Transfer" },
+  add_owner: { title: "Add Owner", badge: "Governance" },
+  remove_owner: { title: "Remove Owner", badge: "Governance" },
+  change_threshold: { title: "Change Threshold", badge: "Governance" },
+  set_spending_limit: { title: "Set Spending Limit", badge: "Spending Limit" },
+};
+
+function KindSummary({ proposal }: { proposal: Proposal }): ReactNode {
+  const { kind } = proposal;
+
+  switch (kind) {
+    case "transfer":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Send {proposal.amount} {proposal.token}
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "add_owner":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Add Owner
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            New owner →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "remove_owner":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Remove Owner
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Remove →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "change_threshold":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Change Threshold
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Require → {proposal.to}
+          </p>
+        </>
+      );
+    case "set_spending_limit":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Set Spending Limit
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Owner →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+            , Limit → {proposal.amount} {proposal.token}
+          </p>
+        </>
+      );
+  }
+}
 
 export function ProposalCard({
   proposal,
@@ -70,22 +168,15 @@ export function ProposalCard({
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors">
       <div className="flex items-start justify-between mb-4 gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-zinc-500 font-mono mb-1">
-            Proposal #{proposal.id}
-          </p>
-          <Link
-            to={`/proposals/${proposal.id}`}
-            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
-          >
-            Send {proposal.amount} {proposal.token}
-          </Link>
-          <p className="text-zinc-500 text-sm font-mono mt-0.5">
-            →{" "}
-            <span className="inline-block max-w-[180px] truncate align-bottom">
-              {proposal.to}
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-xs text-zinc-500 font-mono">
+              Proposal #{proposal.id}
+            </p>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
+              {KIND_LABELS[proposal.kind].badge}
             </span>
-          </p>
-          {/* The proposer's address */}
+          </div>
+          <KindSummary proposal={proposal} />
           <div className="flex items-center gap-2 mt-0.5">
             <p className="text-zinc-500 text-sm font-mono">
               Proposed by → {proposal.proposer.slice(0, 6)}...

@@ -6,7 +6,7 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Proposal, ProposalStatus } from "../types/accord";
+import type { Proposal, ProposalKind, ProposalStatus } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
@@ -64,13 +64,9 @@ function safeBigInt(value: unknown): bigint {
   }
 }
 
-function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"> {
+function mapKind(kind: unknown): { kind: ProposalKind; to: string; amount: string; token: string } {
   if (!kind || typeof kind !== "object") {
-    return {
-      to: "Unknown",
-      amount: "0",
-      token: "Unknown",
-    };
+    return { kind: "transfer", to: "Unknown", amount: "0", token: "Unknown" };
   }
 
   const [variant, payload] = Object.entries(kind as Record<string, unknown>)[0] ?? [];
@@ -80,47 +76,55 @@ function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"
   switch (normalizedVariant) {
     case "transfer":
       return {
+        kind: "transfer",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: stroopsToDisplay(safeBigInt(values[1])),
         token: shortenAddr(String(values[2] ?? "Unknown")),
       };
     case "addowner":
       return {
+        kind: "add_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: "—",
         token: "Add owner",
       };
     case "removeowner":
       return {
+        kind: "remove_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: "—",
         token: "Remove owner",
       };
     case "changethreshold":
       return {
+        kind: "change_threshold",
         to: `${values[0] ?? "Unknown"} approvals`,
         amount: "—",
         token: "Threshold",
       };
-    default:
+    case "setspendinglimit":
       return {
-        to: "Unknown",
-        amount: "0",
-        token: "Unknown",
+        kind: "set_spending_limit",
+        to: shortenAddr(String(values[0] ?? "Unknown")),
+        amount: stroopsToDisplay(safeBigInt(values[1])),
+        token: shortenAddr(String(values[2] ?? "Unknown")),
       };
+    default:
+      return { kind: "transfer", to: "Unknown", amount: "0", token: "Unknown" };
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function mapProposal(raw: any, threshold: number): Proposal {
   const rawDeadline = BigInt(raw.deadline);
-  const details = mapKindDetails(raw.kind);
+  const mapped = mapKind(raw.kind);
 
   return {
     id: Number(raw.id),
-    to: details.to,
-    amount: details.amount,
-    token: details.token,
+    kind: mapped.kind,
+    to: mapped.to,
+    amount: mapped.amount,
+    token: mapped.token,
     description: String(raw.description),
     approvals: Number(raw.approvals),
     threshold,
@@ -142,6 +146,19 @@ export async function getOwners(): Promise<string[]> {
 export async function getThreshold(): Promise<number> {
   const val = await simulateView("get_threshold");
   return Number(scValToNative(val));
+}
+
+export async function getSpendingLimit(owner: string, token: string): Promise<bigint> {
+  try {
+    const val = await simulateView("get_spending_limit", [
+      nativeToScVal(owner, { type: "address" }),
+      nativeToScVal(token, { type: "address" }),
+    ]);
+    const raw = scValToNative(val);
+    return safeBigInt(raw);
+  } catch {
+    return -1n; // No limit record exists
+  }
 }
 
 export async function getTotalProposals(): Promise<number> {
@@ -254,6 +271,26 @@ export async function getContractUsdcBalance(): Promise<string> {
     return "0";
   } catch {
     return "—";
+  }
+}
+
+export async function getGuardian(): Promise<string> {
+  try {
+    const val = await simulateView("get_guardian");
+    const raw = scValToNative(val);
+    return String(raw);
+  } catch {
+    return "Unknown";
+  }
+}
+
+export async function isFrozen(): Promise<boolean> {
+  try {
+    const val = await simulateView("is_frozen");
+    const raw = scValToNative(val);
+    return Boolean(raw);
+  } catch {
+    return false;
   }
 }
 
