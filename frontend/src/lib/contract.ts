@@ -148,6 +148,19 @@ export async function getThreshold(): Promise<number> {
   return Number(scValToNative(val));
 }
 
+export async function getSpendingLimit(owner: string, token: string): Promise<bigint> {
+  try {
+    const val = await simulateView("get_spending_limit", [
+      nativeToScVal(owner, { type: "address" }),
+      nativeToScVal(token, { type: "address" }),
+    ]);
+    const raw = scValToNative(val);
+    return safeBigInt(raw);
+  } catch {
+    return -1n; // No limit record exists
+  }
+}
+
 export async function getTotalProposals(): Promise<number> {
   const val = await simulateView("get_total_proposals");
   return Number(scValToNative(val));

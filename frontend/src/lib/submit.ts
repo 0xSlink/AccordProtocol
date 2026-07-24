@@ -147,6 +147,24 @@ export async function createProposal(
   ]);
 }
 
+export async function createSpendingLimitProposal(
+  callerAddress: string,
+  owner: string,
+  tokenAddress: string,
+  amount: bigint,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_set_spending_limit_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(owner, { type: "address" }),
+    nativeToScVal(tokenAddress, { type: "address" }),
+    nativeToScVal(amount, { type: "i128" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
 export async function estimateCreateProposalFee(
   callerAddress: string,
   to: string,
