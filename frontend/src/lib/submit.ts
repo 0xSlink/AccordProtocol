@@ -164,3 +164,47 @@ export async function estimateCreateProposalFee(
     nativeToScVal(deadlineTs, { type: "u64" }),
   ]);
 }
+
+// ─── Governance proposal creation ────────────────────────────────────────────
+
+export async function createAddOwnerProposal(
+  callerAddress: string,
+  newOwner: string,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_add_owner_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(newOwner, { type: "address" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createRemoveOwnerProposal(
+  callerAddress: string,
+  ownerToRemove: string,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_remove_owner_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(ownerToRemove, { type: "address" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createChangeThresholdProposal(
+  callerAddress: string,
+  newThreshold: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_change_threshold_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(newThreshold, { type: "u32" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
