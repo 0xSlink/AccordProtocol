@@ -85,7 +85,16 @@ fn setup_with_timelock(
     owners.push_back(owner_a.clone());
     owners.push_back(owner_b.clone());
     owners.push_back(owner_c.clone());
-    client.initialize(&owners, &threshold, &time_lock_delay);
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(1);
+        let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &threshold, &time_lock_delay);
 
     // Fund the multisig contract so it can pay out proposals.
     token_sac.mint(&contract_id, &1_000_000_000_000_i128);
@@ -128,7 +137,11 @@ fn initialize_accepts_maximum_owners() {
     }
 
     // Initialize should succeed
-    client.initialize(&owners, &1, &0);
+        let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &1, &0);
 
     // Verify all 20 owners were stored
     let stored_owners = client.get_owners();
@@ -142,8 +155,10 @@ fn initialize_rejects_second_call() {
     owners.push_back(owner_a);
     owners.push_back(owner_b);
     owners.push_back(owner_c);
+    let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() { weights.push_back(1); }
     assert_eq!(
-        client.try_initialize(&owners, &2, &0),
+        client.try_initialize(&owners, &weights, &2, &0),
         Err(Ok(ContractError::AlreadyInitialized))
     );
 }
@@ -156,8 +171,10 @@ fn initialize_rejects_threshold_zero() {
     let client = AccordContractClient::new(&env, &contract_id);
     let mut owners = Vec::new(&env);
     owners.push_back(Address::generate(&env));
+    let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() { weights.push_back(1); }
     assert_eq!(
-        client.try_initialize(&owners, &0, &0),
+        client.try_initialize(&owners, &weights, &0, &0),
         Err(Ok(ContractError::InvalidThreshold))
     );
 }
@@ -170,8 +187,10 @@ fn initialize_rejects_threshold_above_count() {
     let client = AccordContractClient::new(&env, &contract_id);
     let mut owners = Vec::new(&env);
     owners.push_back(Address::generate(&env));
+    let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() { weights.push_back(1); }
     assert_eq!(
-        client.try_initialize(&owners, &2, &0),
+        client.try_initialize(&owners, &weights, &2, &0),
         Err(Ok(ContractError::InvalidThreshold))
     );
 }
@@ -186,8 +205,10 @@ fn initialize_rejects_duplicate_owners() {
     let mut owners = Vec::new(&env);
     owners.push_back(dup.clone());
     owners.push_back(dup);
+    let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() { weights.push_back(1); }
     assert_eq!(
-        client.try_initialize(&owners, &1, &0),
+        client.try_initialize(&owners, &weights, &1, &0),
         Err(Ok(ContractError::DuplicateOwner))
     );
 }
@@ -513,7 +534,7 @@ fn approve_returns_arithmetic_error_on_overflow() {
         status: ProposalStatus::Pending,
         kind: ProposalKind::Transfer(t(&env, &Address::generate(&env), 1_000_000_i128, &token_client.address)),
         ready_at: 0,
-        threshold: 2,
+        quorum_weight: 2,
         category: ProposalCategory::Transfer,
     };
 
@@ -931,9 +952,18 @@ fn full_lifecycle_5of5() {
     owners.push_back(owner_a.clone());
     owners.push_back(owner_b.clone());
     owners.push_back(owner_c.clone());
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(1);
     owners.push_back(owner_d.clone());
     owners.push_back(owner_e.clone());
-    client.initialize(&owners, &5, &0);
+        let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &5, &0);
 
     // Fund the multisig contract so it can pay out proposals.
     token_sac.mint(&contract_id, &1_000_000_000_000_i128);
@@ -992,7 +1022,16 @@ fn execute_fails_when_balance_insufficient() {
     owners.push_back(owner_a.clone());
     owners.push_back(owner_b.clone());
     owners.push_back(owner_c.clone());
-    client.initialize(&owners, &2, &0);
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(1);
+        let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &2, &0);
 
     // Do not mint any tokens to the contract — balance is zero.
 
@@ -1692,7 +1731,11 @@ fn create_add_owner_proposal_rejects_at_max_owners() {
     for _ in 1..20 {
         owners.push_back(Address::generate(&env));
     }
-    client.initialize(&owners, &1, &0);
+        let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &1, &0);
     assert_eq!(client.get_owners().len(), 20);
 
     // Adding a 21st owner would exceed the cap.
@@ -1811,7 +1854,11 @@ proptest! {
         for _ in 0..owner_count {
             owners.push_back(Address::generate(&env));
         }
-        client.initialize(&owners, &threshold, &0);
+            let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &threshold, &0);
         token_sac.mint(&contract_id, &1_000_000_000_000_i128);
 
         let id = client.create_proposal(
