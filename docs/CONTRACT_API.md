@@ -17,6 +17,43 @@ To convert a human-readable amount to the value passed to the contract: multiply
 
 ---
 
+## Common Errors Quick Reference
+
+Scan this table when you hit an error code and need a fast answer. Errors developers hit most often during normal development are listed first. For full cause descriptions and remediation detail, see the [Error Reference](#error-reference) section below.
+
+| Code / Variant | Most common root cause | One-line resolution |
+|----------------|------------------------|---------------------|
+| 3 `Unauthorized` | Signer is not a registered owner (or wrong Freighter account). | Switch to a registered owner address and retry. |
+| 6 `ProposalNotFound` | Wrong `proposal_id`, network, or contract address. | Confirm the ID with `get_total_proposals` on the correct contract. |
+| 12 `InvalidAmount` | Amount is less than 1, empty transfer list, or more than 3 transfers. | Pass 1–3 transfers with each amount ≥ 1 in the token's smallest unit. |
+| 13 `InvalidDeadline` | Deadline is not strictly after the current ledger timestamp. | Set a future Unix deadline with a few minutes of buffer. |
+| 7 `ProposalNotActive` | Proposal is already `Executed`, `Expired`, or `Revoked`. | Check status via `get_proposal`; create a new proposal if needed. |
+| 8 `AlreadyApproved` | This owner already approved the proposal. | Call `revoke` before approving again, or skip. |
+| 10 `ThresholdNotMet` | Not enough approvals (or too few co-signers on guardian/upgrade). | Gather threshold approvals / approvers, then retry. |
+| 11 `ProposalExpired` | Deadline passed before `execute`. | Create a new proposal; sweep the expired ID if needed. |
+| 15 `TransferFailed` | Contract treasury lacks sufficient token balance. | Fund the contract, then retry `execute`. |
+| 14 `InvalidToken` | Token address does not implement the Soroban token interface. | Use a verified SEP-41 token (e.g. canonical XLM/USDC). |
+| 16 `EmptyDescription` | Description string is empty. | Provide a non-empty description. |
+| 17 `DescriptionTooLong` | Description exceeds 300 characters. | Trim the description to ≤ 300 characters. |
+| 9 `NotApproved` | `revoke` called without a prior approval from this owner. | Only revoke after a successful `approve`. |
+| 18 `TooManyActiveProposals` | Active (`Pending`/`Ready`) proposals hit the cap of 50. | Execute or sweep expired proposals, then retry. |
+| 21 `InvalidDuration` | Deadline is more than 90 days from now. | Cap the deadline at ≤ 90 days ahead. |
+| 22 `InvalidRecipient` | Transfer recipient is the contract's own address. | Use an external recipient address. |
+| 28 `SpendingLimitExceeded` | Proposal amount exceeds the proposer's per-token spending limit. | Lower the amount or raise/remove the spending limit. |
+| 23 `TimeLockActive` | Time-lock delay after reaching `Ready` has not elapsed. | Wait until `ready_at + time_lock_delay`, then execute. |
+| 26 `ContractFrozen` | Contract is frozen; create/execute paths are blocked. | Co-sign `unfreeze` with threshold owners. |
+| 27 `NoGuardian` | `freeze` called before a guardian was registered. | Call `set_guardian` first, then freeze. |
+| 1 `AlreadyInitialized` | `initialize` called twice on the same instance. | Deploy a fresh contract; do not re-initialize. |
+| 2 `NotInitialized` | Contract used before `initialize` completed. | Call `initialize` and wait for finality first. |
+| 4 `InvalidThreshold` | Threshold is 0 or greater than the owner count. | Use a threshold in `[1, owners.len()]`. |
+| 5 `InvalidOwners` | Owner list empty, or adding an owner would exceed 20. | Provide 1–20 owners; remove one before adding at cap. |
+| 19 `DuplicateOwner` | Duplicate address in owners/approvers or add-owner list. | Deduplicate addresses before submitting. |
+| 24 `WouldBreakThreshold` | Removing an owner would leave fewer owners than threshold. | Lower threshold first, then remove the owner. |
+| 25 `OwnerNotFound` | Address to remove is not in the current owner list. | Verify with `is_owner` / `get_owners` first. |
+| 20 `ArithmeticError` | Integer overflow/underflow guard tripped (rare). | Contact maintainers; should not occur in normal use. |
+
+---
+
 ## `initialize`
 
 ```rust
@@ -227,6 +264,7 @@ The table below maps every `ContractError` discriminant to its cause and the rec
 | 25 | `OwnerNotFound` | The address supplied to `create_remove_owner_proposal` as `owner_to_remove` is not present in the current owner list. | Verify the address is a registered owner with `is_owner` or `get_owners` before submitting a removal proposal. |
 | 26 | `ContractFrozen` | The contract's frozen flag is `true`. `create_proposal`, `create_add_owner_proposal`, `create_remove_owner_proposal`, `create_change_threshold_proposal`, and `execute` are all blocked while frozen. | The guardian must call `freeze` (already done if this error appears). Only `unfreeze` (requiring threshold co-signers) can restore normal operation. |
 | 27 | `NoGuardian` | `freeze` was called but no guardian address has been stored in the contract (the `GUARD` storage key is absent). | Call `set_guardian` with threshold-many owner approvers to register a guardian address before attempting to freeze. |
+| 28 | `SpendingLimitExceeded` | The proposer's aggregate amount for a token in `create_proposal` exceeds the per-owner spending limit stored for that `(owner, token)` pair. Raised only when a limit has been set; unrestricted owners are unaffected. | Lower the proposal amount so it fits under the limit, or raise/clear the limit via the spending-limit governance path before retrying. |
 
 ---
 

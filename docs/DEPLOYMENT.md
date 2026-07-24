@@ -142,9 +142,46 @@ https://lab.stellar.org/smart-contracts/contract-explorer?contractId=YOUR_CONTRA
 
 ---
 
+## CI WASM Manifest
+
+On every successful contract build pushed to `main`, the [contract CI workflow](../.github/workflows/contract.yml) writes a `wasm-manifest.json` file and uploads it in the same `accord-contract-wasm` artifact as the compiled WASM.
+
+Example shape:
+
+```json
+{
+  "wasm_file": "accord.wasm",
+  "wasm_hash": "0123abcd…",
+  "commit_sha": "deadbeef…",
+  "build_timestamp": "2026-07-23T20:00:00Z",
+  "soroban_sdk_version": "25.3.1"
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `wasm_file` | Basename of the built contract artifact |
+| `wasm_hash` | SHA-256 of the WASM bytes (hex) |
+| `commit_sha` | Git commit that produced the build (`GITHUB_SHA`) |
+| `build_timestamp` | UTC time the CI step generated the manifest |
+| `soroban_sdk_version` | Pinned `soroban-sdk` version from the workspace `Cargo.toml` |
+
+**How to verify a deployed contract against source**
+
+1. Download the `accord-contract-wasm` artifact from the CI run for the commit you intend to verify.
+2. Confirm `commit_sha` in `wasm-manifest.json` matches that commit.
+3. Recompute `sha256sum` (or `shasum -a 256`) of the artifact `accord.wasm` and confirm it equals `wasm_hash`.
+4. On Stellar Expert (or via `stellar contract info hash --id CONTRACT_ID`), confirm the live contract executable hash matches `wasm_hash`.
+
+If the live hash does not match the manifest for the claimed commit, do not treat that deployment as corresponding to that source revision.
+
+---
+
 ## Upgrading the Contract
 
 The contract supports in-place upgrades through a two-step WASM upload and upgrade flow. Only an existing owner may call the `upgrade` function. All on-chain storage (proposals, owners, threshold) is preserved after a successful upgrade.
+
+Before approving or executing an upgrade, follow [`docs/UPGRADE_SAFETY.md`](./UPGRADE_SAFETY.md) for WASM hash verification, owner coordination, post-upgrade validation, and red flags.
 
 **Step 1 — Upload the new WASM and obtain the WASM hash:**
 
