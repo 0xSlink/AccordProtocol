@@ -274,6 +274,26 @@ export async function getContractUsdcBalance(): Promise<string> {
   }
 }
 
+export async function getGuardian(): Promise<string> {
+  try {
+    const val = await simulateView("get_guardian");
+    const raw = scValToNative(val);
+    return String(raw);
+  } catch {
+    return "Unknown";
+  }
+}
+
+export async function isFrozen(): Promise<boolean> {
+  try {
+    const val = await simulateView("is_frozen");
+    const raw = scValToNative(val);
+    return Boolean(raw);
+  } catch {
+    return false;
+  }
+}
+
 export async function getApprovers(proposalId: number): Promise<string[]> {
   try {
     const owners = await getOwners();

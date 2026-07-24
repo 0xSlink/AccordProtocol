@@ -12,6 +12,7 @@ import { useEventPolling } from "./hooks/useEventPolling";
 import { useNotifications } from "./hooks/useNotifications";
 import { useWallet } from "./hooks/useWallet";
 import { approveProposal, executeProposal, revokeProposal } from "./lib/submit";
+import { isFrozen } from "./lib/contract";
 import { DashboardPage } from "./pages/DashboardPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -38,6 +39,7 @@ export default function App() {
   const [txError, setTxError] = useState<string | null>(null);
   const [txPending, setTxPending] = useState(false);
   const [isStale, setIsStale] = useState(false);
+  const [contractFrozen, setContractFrozen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(
     () => (localStorage.getItem("theme") as "dark" | "light" | null) ?? "dark",
   );
@@ -102,6 +104,25 @@ export default function App() {
       }
     }, 10000);
     return () => clearInterval(interval);
+  }, [lastSuccessAt]);
+
+  // Poll frozen state
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      try {
+        const f = await isFrozen();
+        if (!cancelled) setContractFrozen(f);
+      } catch {
+        // ignore
+      }
+    }
+    check();
+    const interval = setInterval(check, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [lastSuccessAt]);
 
   const activeProposals = proposals.filter((proposal) =>
@@ -309,8 +330,17 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 sm:px-6 py-8">
+        {contractFrozen && (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/20 px-4 py-3 text-sm text-red-300 font-medium flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0">
+              <path fillRule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
+            </svg>
+            Contract is currently frozen. All proposal creation and execution has been paused.
+          </div>
+        )}
+
         {isStale && !loading && (
-          <div className="mb-6 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400 font-medium">
+          <div className="mb-6 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-400 font-medium">
             Data may be out of date — last updated over 60 seconds ago.
           </div>
         )}
@@ -430,7 +460,7 @@ export default function App() {
                 />
               }
             />
-            <Route path="settings" element={<SettingsPage stats={stats} />} />
+            <Route path="settings" element={<SettingsPage stats={stats} walletAddress={wallet.address} ownerAddresses={ownerAddresses} onProposalSubmitted={refresh} />} />
             <Route
               path="/proposals/:id"
               element={
