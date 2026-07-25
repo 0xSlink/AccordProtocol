@@ -526,6 +526,41 @@ fn approve_increments_count_and_sets_flag() {
 }
 
 #[test]
+fn get_proposal_approval_progress_returns_live_counts_and_total_owner_weight() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(3);
+    let id = client.create_proposal(
+        &owner_a,
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
+        &str(&env, "Progress"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress, (0, 2, 3));
+
+    client.approve(&owner_a, &id);
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress, (1, 2, 3));
+
+    client.approve(&owner_b, &id);
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress, (2, 2, 3));
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn get_proposal_approval_progress_rejects_missing_proposal() {
+    let (_env, client, _, _, _, _, _) = setup(2);
+    assert_eq!(client.try_get_proposal_approval_progress(&999), Err(Ok(ContractError::ProposalNotFound)));
+}
+
+#[test]
 fn approve_transitions_pending_to_ready() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
     let id = client.create_proposal(

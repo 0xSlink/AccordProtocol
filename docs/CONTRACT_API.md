@@ -171,6 +171,24 @@ Returns the current proposal state with a freshly derived status (Expired status
 
 ---
 
+## `get_proposal_approval_progress`
+
+```rust
+fn get_proposal_approval_progress(env: Env, proposal_id: u64) -> Result<(u32, u32, u32), ContractError>
+```
+
+Returns proposal progress values needed for frontend rendering.
+
+| Return position | Meaning |
+|-----------------|---------|
+| `0` | Current approval weight (`approvals`) |
+| `1` | Required quorum weight (`threshold`) |
+| `2` | Current total owner weight (`total_weight`) |
+
+**Errors:** `NotInitialized`, `ProposalNotFound`
+
+---
+
 ## `get_proposals_paged`
 
 ```rust
