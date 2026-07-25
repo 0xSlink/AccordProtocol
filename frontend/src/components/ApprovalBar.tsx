@@ -1,10 +1,12 @@
+import React from "react";
+
 type ApprovalBarProps = {
   approvals: number;
   threshold: number;
   approverAddresses?: string[];
 };
 
-export function ApprovalBar({ approvals, threshold, approverAddresses = [] }: ApprovalBarProps) {
+export const ApprovalBar = React.memo(function ApprovalBar({ approvals, threshold, approverAddresses = [] }: ApprovalBarProps) {
   return (
     <div className="flex items-center gap-2" aria-label={`${approvals} of ${threshold} approvals`}>
       <div className="flex gap-1">
@@ -34,4 +36,4 @@ export function ApprovalBar({ approvals, threshold, approverAddresses = [] }: Ap
       </span>
     </div>
   );
-}
+});
