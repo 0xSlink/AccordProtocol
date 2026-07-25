@@ -18,9 +18,10 @@ Please read the [README](./README.md) first for product context, architecture, a
 8. [Coding standards](#coding-standards)
 9. [Testing and quality gates](#testing-and-quality-gates)
 10. [Documentation](#documentation)
-11. [Security and responsible disclosure](#security-and-responsible-disclosure)
-12. [Licensing](#licensing)
-13. [Questions and maintainer contact](#questions-and-maintainer-contact)
+11. [Release process](#release-process)
+12. [Security and responsible disclosure](#security-and-responsible-disclosure)
+13. [Licensing](#licensing)
+14. [Questions and maintainer contact](#questions-and-maintainer-contact)
 
 ---
 
@@ -266,7 +267,7 @@ When a reviewer requests changes:
 
 - **Delete your feature branch** to keep the repository tidy. GitHub offers a button for this after merge.
 - **Your name appears in the commit history** as a contributor to the project.
-- **Check the changelog** (`CHANGELOG.md`) to see your change listed in the next release, or follow the [issue tracker](https://github.com/thegreatfeez/accord-protocol/issues) for release announcements.
+- **Check the changelog** (`CHANGELOG.md`) to verify your entry is recorded under `[Unreleased]`. See the [Release process](#release-process) section for details on versioning, tagging, and how unreleased entries are packaged into official releases.
 
 ---
 
@@ -396,6 +397,55 @@ If your change touches both areas, run **both** frontend and contract commands a
 - Update the **README** when you change user-visible setup steps, prerequisites, or high-level architecture.
 - Update **this file** when contribution rules or quality gates change.
 - For small behavior changes, **PR description** may be enough; for new contributor-facing workflows, prefer durable docs in the repo.
+
+---
+
+## Release process
+
+This section covers how releases are planned, versioned, tagged, and documented in Accord Protocol, and how contributors ensure their merged work is included.
+
+### How a release is cut
+
+Releases package accumulated changes from the `main` branch into official, tagged milestones (cross-referenced with [`ROADMAP.md`](./ROADMAP.md)). When cutting a release, a maintainer:
+
+1. Opens a release PR that updates [`CHANGELOG.md`](./CHANGELOG.md):
+   - Moves entries from `## [Unreleased]` into a new version section titled `## [X.Y.Z] - YYYY-MM-DD` (for example, `## [0.2.0] - 2026-08-01`).
+   - Re-creates empty `Added`, `Changed`, `Fixed`, and `Removed` subsections under `## [Unreleased]` for future PRs.
+2. Merges the release PR into `main`.
+3. Creates and pushes an annotated git tag matching the version string (for example, `git tag -a v0.2.0 -m "Release v0.2.0"` followed by `git push origin v0.2.0`).
+4. Publishes a GitHub Release attached to the new tag containing the release notes summary.
+
+### Versioning scheme
+
+Accord Protocol follows [Semantic Versioning (SemVer 2.0.0)](https://semver.org/): `MAJOR.MINOR.PATCH` (for example, `v0.2.0`).
+
+- **MAJOR (`X.0.0`)**: Incremented for breaking contract API changes, incompatible storage layout modifications, or protocol changes requiring data migration.  
+  *Example:* Changing public contract function parameters in `lib.rs` in a way that breaks existing clients, or altering storage keys such that previously written state cannot be deserialized without a migration script.
+- **MINOR (`0.X.0`)**: Incremented for new, backward-compatible features in the contract or frontend.  
+  *Example:* Adding spending limit governance (`create_spending_limit_proposal`), introducing guardian pause controls (`freeze`/`unfreeze`), or adding proposal category filters in the UI.
+- **PATCH (`0.0.X`)**: Incremented for backward-compatible bug fixes, security patches, documentation updates, or internal refactoring.  
+  *Example:* Correcting a deadline validation edge case, fixing a layout bug on proposal cards, or clarifying setup instructions in documentation.
+
+### What belongs in release notes
+
+Release notes provide a concise overview of changes since the prior release for treasury operators, integration developers, and co-owners.
+
+Release notes should include:
+- A high-level summary of the milestone theme (referencing [`ROADMAP.md`](./ROADMAP.md)).
+- Bulleted items organized under the standard Keep a Changelog categories matching [`CHANGELOG.md`](./CHANGELOG.md):
+  - **Added**: New contract functions, UI views, or developer tooling.
+  - **Changed**: Modifications to existing behavior, component styles, or default parameters.
+  - **Fixed**: Bug fixes, security patches, or error handling corrections.
+  - **Removed**: Deprecated or removed functions and features.
+- Explicit migration or upgrade notes if deployment steps or configuration options changed.
+
+### Ensuring your work is included in a release
+
+To ensure your merged pull request is credited and included in the next release:
+
+1. **Update `CHANGELOG.md` in your PR**: Before merging your PR, add a clear bullet point under `## [Unreleased]` in [`CHANGELOG.md`](./CHANGELOG.md) under the appropriate subsection (`Added`, `Changed`, `Fixed`, or `Removed`).
+2. **Write user/developer-oriented entries**: Frame the entry around what changed for users or developers (for example, `- Add spending limit proposal creation flow and display table`).
+3. **Ask when in doubt**: If you are unsure which subsection (`Added` vs `Changed`) your change belongs under, or whether your change requires a changelog entry, comment on your PR or tag a maintainer during code review.
 
 ---
 
