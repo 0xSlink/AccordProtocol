@@ -2,7 +2,7 @@
 #![allow(deprecated)]
 pub mod validate;
 
-use soroban_sdk::{
+use soroban_sdk::{Map, 
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
     IntoVal, String, Symbol, Val, Vec,
 };
@@ -280,8 +280,16 @@ fn max_single_owner_weight_pct_key() -> Symbol {
     symbol_short!("MAXOWNP")
 }
 
-fn owner_weight_key(owner: &Address) -> (Symbol, Address) {
-    (symbol_short!("OWEIGHT"), owner.clone())
+fn read_max_single_owner_weight_pct(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&max_single_owner_weight_pct_key())
+        .unwrap_or(DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT)
+}
+
+fn owner_weight_within_cap(env: &Env, owner_weight: u32, total_weight: u32) -> bool {
+    (owner_weight as u64) * 100
+        <= (total_weight as u64) * (read_max_single_owner_weight_pct(env) as u64)
 }
 
 fn spent_tracking_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
@@ -376,9 +384,9 @@ fn read_threshold(env: &Env) -> Result<u32, ContractError> {
         .ok_or(ContractError::NotInitialized)
 }
 
-fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
+fn read_owners_map(env: &Env) -> Result<Map<Address, u32>, ContractError> {
     let key = owners_key();
-    let owners: Vec<Address> = env
+    let owners: Map<Address, u32> = env
         .storage()
         .persistent()
         .get(&key)
@@ -399,37 +407,10 @@ fn write_total_weight(env: &Env, weight: u32) {
     bump_instance(env);
 }
 
-fn read_max_single_owner_weight_pct(env: &Env) -> u32 {
-    env.storage()
-        .instance()
-        .get(&max_single_owner_weight_pct_key())
-        .unwrap_or(DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT)
-}
 
-fn owner_weight_within_cap(env: &Env, owner_weight: u32, total_weight: u32) -> bool {
-    // Widen before multiplying so the comparison cannot overflow u32.
-    (owner_weight as u64) * 100
-        <= (total_weight as u64) * (read_max_single_owner_weight_pct(env) as u64)
-}
 
-fn read_owner_weight(env: &Env, owner: &Address) -> u32 {
-    let key = owner_weight_key(owner);
-    let weight = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(MIN_OWNER_WEIGHT);
-    if env.storage().persistent().has(&key) {
-        bump_persistent(env, &key);
-    }
-    weight
-}
 
-fn write_owner_weight(env: &Env, owner: &Address, weight: u32) {
-    let key = owner_weight_key(owner);
-    env.storage().persistent().set(&key, &weight);
-    bump_persistent(env, &key);
-}
+
 
 fn read_next_id(env: &Env) -> u64 {
     let id = env
@@ -579,13 +560,9 @@ fn require_not_frozen(env: &Env) -> Result<(), ContractError> {
 
 // ─── Business Logic Helpers ──────────────────────────────────────────────────
 
-fn require_owner(env: &Env, address: &Address) -> Result<(), ContractError> {
-    // Issue #86: use contains() for early-exit O(n) scan, cleaner than manual loop
-    let owners = read_owners(env)?;
-    if owners.contains(address) {
-        return Ok(());
-    }
-    Err(ContractError::Unauthorized)
+fn require_owner_and_weight(env: &Env, address: &Address) -> Result<u32, ContractError> {
+    let owners = read_owners_map(env)?;
+    owners.get(address.clone()).ok_or(ContractError::Unauthorized)
 }
 
 /// Validates privileged co-signers by distinct address and cumulative voting
@@ -604,9 +581,9 @@ fn require_weighted_approvers(env: &Env, approvers: &Vec<Address>) -> Result<(),
     let mut weight: u32 = 0;
     for approver in approvers.iter() {
         approver.require_auth();
-        require_owner(env, &approver)?;
+        let approver_weight = require_owner_and_weight(env, &approver)?;
         weight = weight
-            .checked_add(read_owner_weight(env, &approver))
+            .checked_add(approver_weight)
             .ok_or(ContractError::ArithmeticError)?;
     }
     if weight < threshold {
@@ -690,6 +667,7 @@ impl AccordContract {
         }
 
         // Require auth from all owners and validate/store weights.
+        let mut owners_map = Map::new(&env);
         for i in 0..owners.len() {
             let owner = owners.get(i).unwrap();
             let weight = weights.get(i).unwrap();
@@ -697,9 +675,7 @@ impl AccordContract {
                 return Err(ContractError::InvalidWeight);
             }
             owner.require_auth();
-            if weight != MIN_OWNER_WEIGHT {
-                write_owner_weight(&env, &owner, weight);
-            }
+            owners_map.set(owner.clone(), weight);
             total_weight = total_weight
                 .checked_add(weight)
                 .ok_or(ContractError::ArithmeticError)?;
@@ -721,7 +697,7 @@ impl AccordContract {
         );
 
         let key = owners_key();
-        env.storage().persistent().set(&key, &owners);
+        env.storage().persistent().set(&key, &owners_map);
         bump_persistent(&env, &key);
 
         env.storage().instance().set(&threshold_key(), &threshold);
@@ -750,7 +726,7 @@ impl AccordContract {
         category: ProposalCategory,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         let transfers_len = transfers.len();
@@ -868,14 +844,12 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
-        for owner in owners.iter() {
-            if owner == new_owner {
-                return Err(ContractError::DuplicateOwner);
-            }
+        let owners = read_owners_map(&env)?;
+        if owners.contains_key(new_owner.clone()) {
+            return Err(ContractError::DuplicateOwner);
         }
 
         if owners.len() >= MAX_OWNERS {
@@ -952,7 +926,7 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         if limit < 0 {
@@ -1033,28 +1007,23 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&new_weight) {
             return Err(ContractError::InvalidWeight);
         }
 
-        let owners = read_owners(&env)?;
-        let mut found = false;
-        for owner in owners.iter() {
-            if owner == target_owner {
-                found = true;
-                break;
-            }
-        }
-        if !found {
+        let owners = read_owners_map(&env)?;
+        if !owners.contains_key(target_owner.clone()) {
             return Err(ContractError::OwnerNotFound);
         }
 
+        let target_weight = owners.get(target_owner.clone()).unwrap();
+
         let current_total = read_total_weight(&env);
         let resulting_total = current_total
-            .checked_sub(read_owner_weight(&env, &target_owner))
+            .checked_sub(target_weight)
             .ok_or(ContractError::ArithmeticError)?
             .checked_add(new_weight)
             .ok_or(ContractError::ArithmeticError)?;
@@ -1132,27 +1101,21 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
+        let owners = read_owners_map(&env)?;
         let threshold = read_threshold(&env)?;
 
-        let mut found = false;
-        for owner in owners.iter() {
-            if owner == owner_to_remove {
-                found = true;
-                break;
-            }
-        }
-        if !found {
+        if !owners.contains_key(owner_to_remove.clone()) {
             return Err(ContractError::OwnerNotFound);
         }
 
         // Guard: removing this owner must not make the threshold unachievable.
         // With the absolute-weight model the correct check is whether the
         // remaining total weight would still be >= threshold.
-        let removed_weight = read_owner_weight(&env, &owner_to_remove);
+        let mut owners = read_owners_map(&env)?;
+        let removed_weight = owners.get(owner_to_remove.clone()).ok_or(ContractError::OwnerNotFound)?;
         let total_weight = read_total_weight(&env);
         let remaining_weight = total_weight
             .checked_sub(removed_weight)
@@ -1230,7 +1193,7 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         let total_weight = read_total_weight(&env);
@@ -1305,8 +1268,7 @@ impl AccordContract {
     /// Records `ready_at` the first time the threshold is crossed.
     pub fn approve(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        require_owner(&env, &approver)?;
-
+        let weight = require_owner_and_weight(&env, &approver)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         // Refresh derived status so an already-expired proposal is caught here.
@@ -1325,7 +1287,7 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, true);
 
-        let weight = read_owner_weight(&env, &approver);
+        
         proposal.approvals = proposal
             .approvals
             .checked_add(weight)
@@ -1358,8 +1320,7 @@ impl AccordContract {
     /// threshold the status transitions back to `Pending`.
     pub fn revoke(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        require_owner(&env, &approver)?;
-
+        let weight = require_owner_and_weight(&env, &approver)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         proposal.status = derive_status(&env, &proposal);
@@ -1377,7 +1338,7 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, false);
 
-        let weight = read_owner_weight(&env, &approver);
+        
         proposal.approvals = proposal
             .approvals
             .checked_sub(weight)
@@ -1405,7 +1366,7 @@ impl AccordContract {
     /// has elapsed.
     pub fn execute(env: Env, executor: Address, proposal_id: u64) -> Result<(), ContractError> {
         executor.require_auth();
-        require_owner(&env, &executor)?;
+        require_owner_and_weight(&env, &executor)?;
         require_not_frozen(&env)?;
 
         let mut proposal = read_proposal(&env, proposal_id)?;
@@ -1498,9 +1459,9 @@ impl AccordContract {
                 }
             }
             ProposalKind::AddOwner(new_owner) => {
-                let mut owners = read_owners(&env)?;
+                let mut owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
-                owners.push_back(new_owner.clone());
+                owners.set(new_owner.clone(), MIN_OWNER_WEIGHT);
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
@@ -1521,19 +1482,14 @@ impl AccordContract {
                 );
             }
             ProposalKind::RemoveOwner(owner_to_remove) => {
-                let owners = read_owners(&env)?;
+                let mut owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
-                let mut new_owners = Vec::new(&env);
-                for owner in owners.iter() {
-                    if owner != *owner_to_remove {
-                        new_owners.push_back(owner);
-                    }
-                }
+                let weight = owners.get(owner_to_remove.clone()).unwrap_or(0);
+                owners.remove(owner_to_remove.clone());
                 let key = owners_key();
-                env.storage().persistent().set(&key, &new_owners);
+                env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
 
-                let weight = read_owner_weight(&env, owner_to_remove);
                 let current_total = read_total_weight(&env);
                 write_total_weight(
                     &env,
@@ -1541,9 +1497,6 @@ impl AccordContract {
                         .checked_sub(weight)
                         .ok_or(ContractError::ArithmeticError)?,
                 );
-                env.storage()
-                    .persistent()
-                    .remove(&owner_weight_key(owner_to_remove));
 
                 env.events().publish(
                     (symbol_short!("r_own"),),
@@ -1596,12 +1549,11 @@ impl AccordContract {
                 );
             }
             ProposalKind::ChangeOwnerWeight(target_owner, new_weight) => {
-                // Zero is intentionally disallowed: it leaves an address listed as
-                // an owner while unable to vote. Use RemoveOwner instead.
                 if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(new_weight) {
                     return Err(ContractError::InvalidWeight);
                 }
-                let old_weight = read_owner_weight(&env, target_owner);
+                let mut owners = read_owners_map(&env)?;
+                let old_weight = owners.get(target_owner.clone()).ok_or(ContractError::OwnerNotFound)?;
                 let current_total = read_total_weight(&env);
                 let new_total = current_total
                     .checked_sub(old_weight)
@@ -1627,7 +1579,8 @@ impl AccordContract {
                     }
                 }
 
-                write_owner_weight(&env, target_owner, *new_weight);
+                owners.set(target_owner.clone(), *new_weight);
+                env.storage().persistent().set(&owners_key(), &owners);
                 write_total_weight(&env, new_total);
             }
         }
@@ -1666,7 +1619,7 @@ impl AccordContract {
     /// Returns the number of proposals actually swept.
     pub fn cancel_expired(env: Env, caller: Address, ids: Vec<u64>) -> Result<u32, ContractError> {
         caller.require_auth();
-        require_owner(&env, &caller)?;
+        require_owner_and_weight(&env, &caller)?;
 
         let mut swept: u32 = 0;
 
@@ -1697,11 +1650,11 @@ impl AccordContract {
     /// (i.e. approved and not subsequently revoked). Errors if the contract is
     /// not initialized or the proposal does not exist.
     pub fn get_approvers(env: Env, proposal_id: u64) -> Result<Vec<Address>, ContractError> {
-        let owners = read_owners(&env)?;
+        let owners = read_owners_map(&env)?;
         read_proposal(&env, proposal_id)?;
 
         let mut approvers = Vec::new(&env);
-        for owner in owners.iter() {
+        for owner in owners.keys().iter() {
             if read_approval(&env, proposal_id, &owner) {
                 approvers.push_back(owner);
             }
@@ -1721,8 +1674,7 @@ impl AccordContract {
 
     /// Returns a current owner's voting weight, or `OwnerNotFound` otherwise.
     pub fn get_owner_weight(env: Env, owner: Address) -> Result<u32, ContractError> {
-        require_owner(&env, &owner)?;
-        Ok(read_owner_weight(&env, &owner))
+        require_owner_and_weight(&env, &owner)
     }
 
     /// Returns the configured maximum percentage of total weight that one owner
@@ -1770,7 +1722,7 @@ impl AccordContract {
     ) -> Result<(u32, u32, u32), ContractError> {
         let proposal = read_proposal(&env, proposal_id)?;
         let total_weight = read_total_weight(&env);
-        Ok((proposal.approvals, proposal.threshold, total_weight))
+        Ok((proposal.approvals, proposal.quorum_weight, total_weight))
     }
 
     /// Returns a page of proposals. `offset` is a 0-based index; `limit` is capped at 20.
@@ -1795,7 +1747,7 @@ impl AccordContract {
 
     /// Returns all current owners.
     pub fn get_owners(env: Env) -> Result<Vec<Address>, ContractError> {
-        read_owners(&env)
+        Ok(read_owners_map(&env)?.keys())
     }
 
     /// Returns the spending limit for an (owner, token) pair, or `None` if no
@@ -1830,7 +1782,7 @@ impl AccordContract {
 
     /// Returns whether `address` is a current owner.
     pub fn is_owner(env: Env, address: Address) -> bool {
-        require_owner(&env, &address).is_ok()
+        require_owner_and_weight(&env, &address).is_ok()
     }
 
     /// Returns whether `owner` has approved `proposal_id`.
@@ -1951,6 +1903,11 @@ impl AccordContract {
         );
 
         Ok(())
+    }
+
+    /// Exposes the current threshold dynamically
+    pub fn get_required_quorum_weight(env: Env) -> u32 {
+        read_threshold(&env).unwrap_or(0)
     }
 }
 
