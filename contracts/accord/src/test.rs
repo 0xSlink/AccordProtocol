@@ -619,6 +619,37 @@ fn revoke_allows_reapprove() {
 }
 
 #[test]
+fn revoke_and_reapprove_cycles_ready_pending_ready() {
+    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Pay"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Stage 1: Approved -> Ready
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+    assert_eq!(client.get_proposal(&id).approvals, 2);
+    assert!(client.has_approved(&id, &owner_a));
+
+    // Stage 2: Revoked -> Pending
+    client.revoke(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    assert_eq!(client.get_proposal(&id).approvals, 1);
+    assert!(!client.has_approved(&id, &owner_a));
+
+    // Stage 3: Re-approved -> Ready
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+    assert_eq!(client.get_proposal(&id).approvals, 2);
+    assert!(client.has_approved(&id, &owner_a));
+}
+
+#[test]
 fn has_approved_returns_false_after_revoke() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
