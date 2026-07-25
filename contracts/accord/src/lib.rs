@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(deprecated)]
 pub mod validate;
 
 use soroban_sdk::{
@@ -40,6 +41,16 @@ pub enum ProposalKind {
     /// SetSpendingLimit(owner, token, limit) — per-owner cap on the amount that
     /// `owner` may propose for `token`. A limit of 0 blocks that token entirely.
     SetSpendingLimit(Address, Address, i128),
+    /// ChangeOwnerWeight(target_owner, new_weight) — updates an existing owner's
+    /// voting weight. The new weight must be within [MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT].
+    ChangeOwnerWeight(Address, u32),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SpentTracker {
+    pub spent: i128,
+    pub epoch: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -127,6 +138,36 @@ pub struct UpgradeExecutedEvent {
     pub new_wasm_hash: BytesN<32>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AddOwnerExecutedEvent {
+    pub new_owner: Address,
+    pub owner_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RemoveOwnerExecutedEvent {
+    pub removed_owner: Address,
+    pub owner_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ChangeThresholdExecutedEvent {
+    pub previous_threshold: u32,
+    pub new_threshold: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SetSpendingLimitExecutedEvent {
+    pub owner: Address,
+    pub token: Address,
+    pub previous_limit: Option<i128>,
+    pub new_limit: i128,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,13 +252,16 @@ fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Add
     (symbol_short!("SLIMIT"), owner.clone(), token.clone())
 }
 
-
 fn total_weight_key() -> Symbol {
     symbol_short!("TWEIGHT")
 }
 
 fn owner_weight_key(owner: &Address) -> (Symbol, Address) {
     (symbol_short!("OWEIGHT"), owner.clone())
+}
+
+fn spent_tracking_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
+    (symbol_short!("SPENT"), owner.clone(), token.clone())
 }
 
 // ─── TTL Constants ───────────────────────────────────────────────────────────
@@ -278,6 +322,15 @@ const MIN_OWNER_WEIGHT: u32 = 1;
 /// Maximum owner weight.
 const MAX_OWNER_WEIGHT: u32 = 100_000;
 
+/// Spending window: 30 days in seconds. The cumulative spent amount per (owner, token)
+/// resets when this window elapses since the first tracked spend in the window.
+/// Epoch-based window: the window clock starts ticking from the timestamp of the first
+/// spend (or when the limit was set). This is deterministic — two contracts with the
+/// same set of operations will arrive at identical window boundaries. A rolling window
+/// (sliding per-transaction) was considered but rejected because it would make the
+/// "available limit" view depend on the exact time of each prior transaction, producing
+/// non-deterministic behavior across nodes executing the same transaction sequence.
+const SPENDING_WINDOW: u64 = 2_592_000;
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
@@ -307,7 +360,10 @@ fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
 }
 
 fn read_total_weight(env: &Env) -> u32 {
-    env.storage().instance().get(&total_weight_key()).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&total_weight_key())
+        .unwrap_or(0)
 }
 
 fn write_total_weight(env: &Env, weight: u32) {
@@ -317,7 +373,11 @@ fn write_total_weight(env: &Env, weight: u32) {
 
 fn read_owner_weight(env: &Env, owner: &Address) -> u32 {
     let key = owner_weight_key(owner);
-    let weight = env.storage().persistent().get(&key).unwrap_or(MIN_OWNER_WEIGHT);
+    let weight = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(MIN_OWNER_WEIGHT);
     if env.storage().persistent().has(&key) {
         bump_persistent(env, &key);
     }
@@ -329,7 +389,6 @@ fn write_owner_weight(env: &Env, owner: &Address, weight: u32) {
     env.storage().persistent().set(&key, &weight);
     bump_persistent(env, &key);
 }
-
 
 fn read_next_id(env: &Env) -> u64 {
     let id = env
@@ -393,6 +452,34 @@ fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128
     let key = spending_limit_key(owner, token);
     env.storage().persistent().set(&key, &limit);
     bump_persistent(env, &key);
+}
+
+fn read_spent_tracker(env: &Env, owner: &Address, token: &Address) -> SpentTracker {
+    let key = spent_tracking_key(owner, token);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(SpentTracker { spent: 0, epoch: 0 })
+}
+
+fn write_spent_tracker(env: &Env, owner: &Address, token: &Address, tracker: &SpentTracker) {
+    let key = spent_tracking_key(owner, token);
+    env.storage().persistent().set(&key, tracker);
+    bump_persistent(env, &key);
+}
+
+/// Returns the amount effectively spent within the current spending window.
+/// If no window is active (epoch == 0) or the window has expired, returns 0.
+fn effective_spent(env: &Env, owner: &Address, token: &Address) -> i128 {
+    let tracker = read_spent_tracker(env, owner, token);
+    if tracker.epoch == 0 {
+        return 0;
+    }
+    let now = env.ledger().timestamp();
+    if now > tracker.epoch.saturating_add(SPENDING_WINDOW) {
+        return 0;
+    }
+    tracker.spent
 }
 
 fn read_active_count(env: &Env) -> u32 {
@@ -541,14 +628,16 @@ impl AccordContract {
         for i in 0..owners.len() {
             let owner = owners.get(i).unwrap();
             let weight = weights.get(i).unwrap();
-            if weight < MIN_OWNER_WEIGHT || weight > MAX_OWNER_WEIGHT {
+            if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&weight) {
                 return Err(ContractError::InvalidWeight);
             }
             owner.require_auth();
             if weight != MIN_OWNER_WEIGHT {
                 write_owner_weight(&env, &owner, weight);
             }
-            total_weight = total_weight.checked_add(weight).ok_or(ContractError::ArithmeticError)?;
+            total_weight = total_weight
+                .checked_add(weight)
+                .ok_or(ContractError::ArithmeticError)?;
         }
         write_total_weight(&env, total_weight);
 
@@ -619,8 +708,15 @@ impl AccordContract {
                 }
             }
             for i in 0..checked_tokens.len() {
-                if let Some(limit) = read_spending_limit(&env, &proposer, &checked_tokens.get(i).unwrap()) {
-                    if checked_totals.get(i).unwrap() > limit {
+                let token = checked_tokens.get(i).unwrap();
+                if let Some(limit) = read_spending_limit(&env, &proposer, &token) {
+                    let already_spent = effective_spent(&env, &proposer, &token);
+                    let cumulative = checked_totals
+                        .get(i)
+                        .unwrap()
+                        .checked_add(already_spent)
+                        .ok_or(ContractError::ArithmeticError)?;
+                    if cumulative > limit {
                         return Err(ContractError::SpendingLimitExceeded);
                     }
                 }
@@ -810,6 +906,96 @@ impl AccordContract {
             approvals: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::SetSpendingLimit(owner, token, limit),
+            ready_at: 0,
+            quorum_weight: threshold,
+            category: ProposalCategory::Other,
+        };
+        write_proposal(&env, &proposal);
+        write_active_count(&env, active + 1);
+
+        env.events().publish(
+            (symbol_short!("created"),),
+            ProposalCreatedEvent {
+                id,
+                proposer,
+                threshold,
+                category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
+            },
+        );
+
+        Ok(id)
+    }
+
+    /// Creates a proposal to change an existing owner's voting weight.
+    ///
+    /// # Arguments
+    /// * `proposer` - Owner proposing the change. Must authorize.
+    /// * `target_owner` - Address of the owner whose weight to change. Must be
+    ///   a current owner.
+    /// * `new_weight` - The new voting weight. Must be within
+    ///   [MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT].
+    pub fn create_change_weight_proposal(
+        env: Env,
+        proposer: Address,
+        target_owner: Address,
+        new_weight: u32,
+        description: String,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&new_weight) {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let owners = read_owners(&env)?;
+        let mut found = false;
+        for owner in owners.iter() {
+            if owner == target_owner {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(ContractError::OwnerNotFound);
+        }
+
+        if description.is_empty() {
+            return Err(ContractError::EmptyDescription);
+        }
+        if description.len() > MAX_DESCRIPTION_LEN {
+            return Err(ContractError::DescriptionTooLong);
+        }
+
+        let now = env.ledger().timestamp();
+        if deadline <= now {
+            return Err(ContractError::InvalidDeadline);
+        }
+        if deadline - now > MAX_PROPOSAL_DURATION {
+            return Err(ContractError::InvalidDuration);
+        }
+
+        let active = read_active_count(&env);
+        if active >= MAX_ACTIVE_PROPOSALS {
+            return Err(ContractError::TooManyActiveProposals);
+        }
+
+        let threshold = read_threshold(&env)?;
+        let id = read_next_id(&env);
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
+
+        let proposal = Proposal {
+            id,
+            proposer: proposer.clone(),
+            description,
+            deadline,
+            approvals: 0,
+            status: ProposalStatus::Pending,
+            kind: ProposalKind::ChangeOwnerWeight(target_owner, new_weight),
             ready_at: 0,
             quorum_weight: threshold,
             category: ProposalCategory::Other,
@@ -1139,22 +1325,78 @@ impl AccordContract {
             ProposalKind::Transfer(transfers) => {
                 for transfer in transfers.iter() {
                     if token::Client::new(&env, &transfer.token)
-                        .try_transfer(&env.current_contract_address(), &transfer.to, &transfer.amount)
+                        .try_transfer(
+                            &env.current_contract_address(),
+                            &transfer.to,
+                            &transfer.amount,
+                        )
                         .is_err()
                     {
                         return Err(ContractError::TransferFailed);
                     }
                 }
+                // Track cumulative spending per token for the proposer.
+                let proposer = proposal.proposer.clone();
+                let mut tracked_tokens: Vec<Address> = Vec::new(&env);
+                let mut tracked_amounts: Vec<i128> = Vec::new(&env);
+                for transfer in transfers.iter() {
+                    let mut found = false;
+                    for j in 0..tracked_tokens.len() {
+                        if tracked_tokens.get(j).unwrap() == transfer.token {
+                            let total = tracked_amounts
+                                .get(j)
+                                .unwrap()
+                                .checked_add(transfer.amount)
+                                .ok_or(ContractError::ArithmeticError)?;
+                            tracked_amounts.set(j, total);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        tracked_tokens.push_back(transfer.token.clone());
+                        tracked_amounts.push_back(transfer.amount);
+                    }
+                }
+                let now = env.ledger().timestamp();
+                for j in 0..tracked_tokens.len() {
+                    let token = tracked_tokens.get(j).unwrap();
+                    let amount = tracked_amounts.get(j).unwrap();
+                    let tracker = read_spent_tracker(&env, &proposer, &token);
+                    let epoch = if tracker.epoch == 0 {
+                        now
+                    } else {
+                        tracker.epoch
+                    };
+                    let spent = if now > epoch.saturating_add(SPENDING_WINDOW) {
+                        amount
+                    } else {
+                        tracker
+                            .spent
+                            .checked_add(amount)
+                            .ok_or(ContractError::ArithmeticError)?
+                    };
+                    write_spent_tracker(&env, &proposer, &token, &SpentTracker { spent, epoch });
+                }
             }
             ProposalKind::AddOwner(new_owner) => {
                 let mut owners = read_owners(&env)?;
+                let prev_count = owners.len();
                 owners.push_back(new_owner.clone());
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
+                env.events().publish(
+                    (symbol_short!("a_own"),),
+                    AddOwnerExecutedEvent {
+                        new_owner: new_owner.clone(),
+                        owner_count: prev_count + 1,
+                    },
+                );
             }
             ProposalKind::RemoveOwner(owner_to_remove) => {
                 let owners = read_owners(&env)?;
+                let prev_count = owners.len();
                 let mut new_owners = Vec::new(&env);
                 for owner in owners.iter() {
                     if owner != *owner_to_remove {
@@ -1176,15 +1418,82 @@ impl AccordContract {
                 env.storage()
                     .persistent()
                     .remove(&owner_weight_key(owner_to_remove));
+
+                env.events().publish(
+                    (symbol_short!("r_own"),),
+                    RemoveOwnerExecutedEvent {
+                        removed_owner: owner_to_remove.clone(),
+                        owner_count: prev_count - 1,
+                    },
+                );
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
+                let old_threshold = env
+                    .storage()
+                    .instance()
+                    .get::<_, u32>(&threshold_key())
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&threshold_key(), new_threshold);
                 bump_instance(&env);
+                env.events().publish(
+                    (symbol_short!("c_thr"),),
+                    ChangeThresholdExecutedEvent {
+                        previous_threshold: old_threshold,
+                        new_threshold: *new_threshold,
+                    },
+                );
             }
             ProposalKind::SetSpendingLimit(owner, token, limit) => {
+                let prev_limit = read_spending_limit(&env, owner, token);
                 write_spending_limit(&env, owner, token, *limit);
+                // Reset cumulative spending tracking when a new limit is set.
+                let now = env.ledger().timestamp();
+                write_spent_tracker(
+                    &env,
+                    owner,
+                    token,
+                    &SpentTracker {
+                        spent: 0,
+                        epoch: now,
+                    },
+                );
+                env.events().publish(
+                    (symbol_short!("s_lim"),),
+                    SetSpendingLimitExecutedEvent {
+                        owner: owner.clone(),
+                        token: token.clone(),
+                        previous_limit: prev_limit,
+                        new_limit: *limit,
+                    },
+                );
+            }
+            ProposalKind::ChangeOwnerWeight(target_owner, new_weight) => {
+                let old_weight = read_owner_weight(&env, target_owner);
+                let current_total = read_total_weight(&env);
+                let new_total = current_total
+                    .checked_sub(old_weight)
+                    .ok_or(ContractError::ArithmeticError)?
+                    .checked_add(*new_weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+
+                // Invariant: ensure no active (Pending/Ready) proposal would
+                // become un-quorumable (quorum_weight > new_total_weight).
+                let next_id = read_next_id(&env);
+                for id in 1..next_id {
+                    if let Ok(active_proposal) = read_proposal(&env, id) {
+                        let status = derive_status(&env, &active_proposal);
+                        if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && active_proposal.quorum_weight > new_total
+                        {
+                            return Err(ContractError::WouldBreakThreshold);
+                        }
+                    }
+                }
+
+                write_owner_weight(&env, target_owner, *new_weight);
+                write_total_weight(&env, new_total);
             }
         }
 
@@ -1311,6 +1620,15 @@ impl AccordContract {
     /// limit is set (the owner is unrestricted for that token).
     pub fn get_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
         read_spending_limit(&env, &owner, &token)
+    }
+
+    /// Returns the remaining spending limit (limit minus cumulative spent within
+    /// the current window) for an `(owner, token)` pair. Returns `None` if no
+    /// limit is set (the owner is unrestricted for that token).
+    pub fn get_remaining_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
+        let limit = read_spending_limit(&env, &owner, &token)?;
+        let spent = effective_spent(&env, &owner, &token);
+        Some(limit.saturating_sub(spent))
     }
 
     /// Returns the current approval threshold.
