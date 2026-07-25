@@ -305,17 +305,21 @@ Each Soroban event has an ordered **topics array** followed by a **data payload*
 |-------|-----------|----------------|-------------|
 | `id` | `u64` | `ScVal::U64` | Unique proposal ID assigned by the counter |
 | `proposer` | `Address` | `ScVal::Address` | Owner who created the proposal |
-| `to` | `Address` | `ScVal::Address` | Recipient address of the transfer |
-| `amount` | `i128` | `ScVal::I128` | Transfer amount (see [Token Amounts](#token-amounts-and-decimals)) |
 | `threshold` | `u32` | `ScVal::U32` | Approval threshold in effect at creation |
+| `category` | `ProposalCategory` | `ScVal::U32` (enum discriminant) | Spending category tag (`Transfer`, `Payroll`, `Grant`, `Ops`, `Other`) |
+| `transfers` | `Vec<Transfer>` | `ScVal::Vec` | Asset transfers attached to the proposal; empty for governance proposals (add/remove owner, change threshold, spending limit) |
+| `quorum_weight` | `u32` | `ScVal::U32` | The weighted quorum this proposal must reach to become `Ready`. Snapshotted from the threshold at the moment of creation so auditors can reconstruct the exact approval requirement even if the threshold is changed by a later governance proposal. |
+| `total_weight_at_creation` | `u32` | `ScVal::U32` | Sum of all owner weights at the moment this proposal was created. Because owners can be added, removed, or re-weighted after creation, this field is the only way to recover the original total-weight context from the event log alone — it is not derivable from current contract state once ownership changes. |
 
 ```rust
 struct ProposalCreatedEvent {
     id: u64,
     proposer: Address,
-    to: Address,
-    amount: i128,
     threshold: u32,
+    category: ProposalCategory,
+    transfers: Vec<Transfer>,
+    quorum_weight: u32,
+    total_weight_at_creation: u32,
 }
 ```
 

@@ -75,6 +75,16 @@ pub struct ProposalCreatedEvent {
     pub threshold: u32,
     pub category: ProposalCategory,
     pub transfers: Vec<Transfer>,
+    /// The weighted quorum this proposal must reach to become `Ready`. Snapshotted
+    /// at creation so auditors can reconstruct the exact approval requirement even
+    /// after the threshold changes via a later governance proposal.
+    pub quorum_weight: u32,
+    /// Sum of all owner weights at the moment this proposal was created. Because
+    /// owners can be added, removed, or re-weighted after creation, this field is
+    /// the only way to recover the original total-weight context from the event
+    /// log alone — it is not derivable from current contract state once ownership
+    /// changes.
+    pub total_weight_at_creation: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -667,6 +677,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -675,6 +686,8 @@ impl AccordContract {
                 threshold,
                 category,
                 transfers,
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -744,6 +757,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -752,6 +766,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -817,6 +833,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -825,6 +842,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -905,6 +924,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -913,6 +933,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -981,6 +1003,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -989,6 +1012,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 

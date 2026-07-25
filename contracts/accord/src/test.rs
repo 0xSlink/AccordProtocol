@@ -1853,6 +1853,58 @@ fn proposer_without_limit_is_unrestricted() {
 
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
 
+// ─── ProposalCreatedEvent weight snapshot ────────────────────────────────────
+
+/// Verifies that `ProposalCreatedEvent` captures `quorum_weight` and
+/// `total_weight_at_creation` at the moment of creation, and that those
+/// recorded values are unaffected by weight changes made afterwards.
+#[test]
+fn test_proposal_created_event_snapshots_weights() {
+    // 3 owners each with weight 1, threshold 2 → total_weight = 3.
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let recipient = Address::generate(&env);
+    let _id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Snapshot test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Capture the ProposalCreatedEvent emitted by the creation call.
+    let all_events = env.events().all();
+    let contract_events = all_events.filter_by_contract(&client.address);
+    assert!(!contract_events.events().is_empty(), "expected a created event");
+
+    let event_data = match &contract_events.events().first().unwrap().body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalCreatedEvent = event_data.into_val(&env);
+
+    // At creation: threshold = 2, total_weight = 3.
+    assert_eq!(event.quorum_weight, 2, "quorum_weight should equal the threshold at creation");
+    assert_eq!(event.total_weight_at_creation, 3, "total_weight_at_creation should equal the sum of all owner weights at creation");
+
+    // Remove owner_c, reducing the live total weight to 2.
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_c,
+        &str(&env, "Remove owner_c"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_b, &remove_id);
+    client.execute(&owner_b, &remove_id);
+
+    // Live total weight is now 2.
+    assert_eq!(client.get_total_weight(), 2, "total weight after removal should be 2");
+
+    // The original captured event must still reflect the values from creation time.
+    assert_eq!(event.quorum_weight, 2, "historical quorum_weight must be unchanged after owner removal");
+    assert_eq!(event.total_weight_at_creation, 3, "historical total_weight_at_creation must be unchanged after owner removal");
+}
+
 proptest! {
     // Soroban builds a fresh Env per case, so keep the case count modest.
     #![proptest_config(ProptestConfig::with_cases(32))]
