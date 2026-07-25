@@ -2610,3 +2610,208 @@ fn execute_rejected_with_insufficient_weighted_votes() {
     );
 }
 
+// ─── Weighted Active Count & cancel_expired (issue #269) ───────────────────────
+
+#[test]
+fn weighted_proposal_ready_via_weighted_approval_expires_and_is_swept() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Owner A has weight 3; B and C have weight 1. Threshold = 3.
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &3, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let short_deadline = NOW + 100;
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Weighted, will expire"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+
+    // Owner A (weight 3) alone meets quorum 3 → Ready.
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+
+    // Advance past deadline without executing → Expired.
+    set_timestamp(&env, short_deadline + 1);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Expired);
+
+    // cancel_expired sweeps it and decrements active count.
+    let mut ids = Vec::new(&env);
+    ids.push_back(id);
+    let swept = client.cancel_expired(&owner_a, &ids);
+    assert_eq!(swept, 1);
+}
+
+#[test]
+fn weighted_proposal_insufficient_weight_expires_not_counted_active() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // C has weight 3; A and B have weight 1. Threshold = 3.
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(3);
+    client.initialize(&owners, &weights, &3, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let short_deadline = NOW + 100;
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Needs weight 3, has 2"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+
+    // A + B approve (1+1=2). Below quorum 3 → stays Pending.
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Advance past deadline → Expired.
+    set_timestamp(&env, short_deadline + 1);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Expired);
+
+    // Sweep and confirm.
+    let mut ids = Vec::new(&env);
+    ids.push_back(id);
+    let swept = client.cancel_expired(&owner_a, &ids);
+    assert_eq!(swept, 1);
+}
+
+#[test]
+fn weighted_active_count_sequence_execute_expire_sweep() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // A=3, B=1, C=1. Threshold=2. Total=5.
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &2, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let short_deadline = NOW + 200;
+    let long_deadline = NOW + 10_000;
+
+    // P1: A approves (3) → Ready, then execute.
+    let p1 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "P1-execute"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &p1);
+    assert_eq!(client.get_proposal(&p1).status, ProposalStatus::Ready);
+    client.execute(&owner_a, &p1);
+    assert_eq!(client.get_proposal(&p1).status, ProposalStatus::Executed);
+
+    // P2: B+C approve (1+1=2) → Ready, then expires.
+    let p2 = client.create_proposal(
+        &owner_b,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "P2-expire"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_b, &p2);
+    client.approve(&owner_c, &p2);
+    assert_eq!(client.get_proposal(&p2).status, ProposalStatus::Ready);
+
+    // P3: A approves (3) → Ready, then execute.
+    let p3 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "P3-execute"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &p3);
+    assert_eq!(client.get_proposal(&p3).status, ProposalStatus::Ready);
+    client.execute(&owner_a, &p3);
+    assert_eq!(client.get_proposal(&p3).status, ProposalStatus::Executed);
+
+    // Advance past short deadline — P2 expires.
+    set_timestamp(&env, short_deadline + 1);
+    assert_eq!(client.get_proposal(&p2).status, ProposalStatus::Expired);
+
+    // Sweep P2.
+    let mut ids = Vec::new(&env);
+    ids.push_back(p2);
+    let swept = client.cancel_expired(&owner_a, &ids);
+    assert_eq!(swept, 1);
+
+    // All proposals are now terminal; a fresh proposal should work.
+    let p4 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "P4-fresh"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    assert!(p4 > 0);
+}
