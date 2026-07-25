@@ -80,6 +80,14 @@ pub struct Proposal {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct ProposalApprovalProgress {
+    pub approval_weight: u32,
+    pub quorum_weight: u32,
+    pub total_weight: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct ProposalCreatedEvent {
     pub id: u64,
     pub proposer: Address,
@@ -1654,6 +1662,21 @@ impl AccordContract {
     /// Returns whether `owner` has approved `proposal_id`.
     pub fn has_approved(env: Env, proposal_id: u64, owner: Address) -> bool {
         read_approval(&env, proposal_id, &owner)
+    }
+
+    /// Returns the current approval progress for a proposal: the cumulative
+    /// approval weight, the required quorum weight, and the total weight of
+    /// all owners.
+    pub fn get_proposal_approval_progress(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<ProposalApprovalProgress, ContractError> {
+        let proposal = read_proposal(&env, proposal_id)?;
+        Ok(ProposalApprovalProgress {
+            approval_weight: proposal.approvals,
+            quorum_weight: proposal.quorum_weight,
+            total_weight: read_total_weight(&env),
+        })
     }
 
     // ─── Guardian ─────────────────────────────────────────────────────────────
