@@ -1760,6 +1760,11 @@ impl AccordContract {
         read_threshold(&env)
     }
 
+    /// Returns the quorum weight a newly created proposal would currently be assigned.
+    pub fn get_required_quorum_weight(env: Env) -> Result<u32, ContractError> {
+        read_threshold(&env)
+    }
+
     /// Returns the time-lock delay in seconds. A value of 0 means no delay.
     pub fn get_time_lock_delay(env: Env) -> u64 {
         env.storage().instance().get(&timelock_key()).unwrap_or(0)
@@ -1895,10 +1900,6 @@ impl AccordContract {
         Ok(())
     }
 
-    /// Exposes the current threshold dynamically
-    pub fn get_required_quorum_weight(env: Env) -> u32 {
-        read_threshold(&env).unwrap_or(0)
-    }
 }
 
 mod test;
