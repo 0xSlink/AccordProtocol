@@ -1584,6 +1584,17 @@ impl AccordContract {
         read_total_weight(&env)
     }
 
+    /// Returns the quorum weight a newly created proposal would currently be
+    /// assigned. This is the exact value stored in `Proposal.quorum_weight` and
+    /// emitted in `ProposalCreatedEvent.quorum_weight` for any proposal created
+    /// at this moment — so frontends can display the required quorum before the
+    /// user submits a transaction.
+    ///
+    /// This function is read-only and has no side effects.
+    pub fn get_required_quorum_weight(env: Env) -> Result<u32, ContractError> {
+        read_threshold(&env)
+    }
+
     /// Returns the current state of a proposal with a derived status.
     pub fn get_proposal(env: Env, proposal_id: u64) -> Result<Proposal, ContractError> {
         let mut proposal = read_proposal(&env, proposal_id)?;

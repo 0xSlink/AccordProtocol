@@ -988,6 +988,72 @@ fn get_version_returns_current_version() {
     assert_eq!(client.get_version(), 1);
 }
 
+// ─── get_required_quorum_weight ───────────────────────────────────────────────
+
+/// The view function must return the same quorum weight that gets stored on a
+/// proposal created immediately afterwards.
+#[test]
+fn get_required_quorum_weight_matches_newly_created_proposal() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+
+    // Read the view before creating any proposal.
+    let reported = client.get_required_quorum_weight();
+
+    // Create a proposal and check its stored quorum_weight.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Quorum match test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let proposal = client.get_proposal(&id);
+
+    assert_eq!(
+        reported,
+        proposal.quorum_weight,
+        "get_required_quorum_weight() must equal the quorum_weight stored on the next created proposal"
+    );
+}
+
+/// The view function must reflect the updated threshold after a
+/// change-threshold proposal is executed.
+#[test]
+fn get_required_quorum_weight_updates_after_threshold_change() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    // Initial threshold is 2.
+    assert_eq!(client.get_required_quorum_weight(), 2);
+
+    // Propose and execute a threshold change to 3.
+    let change_id = client.create_change_threshold_proposal(
+        &owner_a,
+        &3,
+        &str(&env, "Raise threshold to 3"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_b, &change_id);
+    client.execute(&owner_c, &change_id);
+
+    // View must now reflect the new threshold.
+    assert_eq!(
+        client.get_required_quorum_weight(),
+        3,
+        "get_required_quorum_weight() must return the updated threshold after a change"
+    );
+
+    // A proposal created now must also carry the updated quorum weight.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Post-change proposal"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(client.get_proposal(&id).quorum_weight, 3);
+}
+
 #[test]
 fn is_owner_returns_correct_results() {
     let (_, client, owner_a, _, _, non_owner, _) = setup(2);

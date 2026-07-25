@@ -201,6 +201,20 @@ Returns the approval threshold.
 
 ---
 
+## `get_required_quorum_weight`
+
+```rust
+fn get_required_quorum_weight(env: Env) -> Result<u32, ContractError>
+```
+
+Returns the quorum weight a newly created proposal would currently be assigned — that is, the value that would be stored in `Proposal.quorum_weight` and emitted in `ProposalCreatedEvent.quorum_weight` if a proposal were created right now. This is the same computation the proposal-creation functions use internally, so the view and the actual creation path can never drift out of sync.
+
+Frontends should call this before rendering a "create proposal" screen so they can display the required quorum to the user before any transaction is submitted. The function is read-only and has no side effects.
+
+**Errors:** `NotInitialized`
+
+---
+
 ## `get_total_proposals`
 
 ```rust
