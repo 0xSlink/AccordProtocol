@@ -3303,3 +3303,170 @@ fn set_spending_limit_execute_emits_spending_limit_event() {
     assert_eq!(event2.previous_limit, Some(1_000_000));
     assert_eq!(event2.new_limit, 2_000_000);
 }
+
+
+
+#[test]
+fn spending_limit_independent_of_voting_weight() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+
+    let token_contract = env.register_stellar_asset_contract_v2(owner_c.clone());
+    let token_client = token::Client::new(&env, &token_contract.address());
+    let token_admin = token::StellarAssetClient::new(&env, &token_contract.address());
+
+    // Mint tokens to the contract
+    let contract_id = env.register(AccordContract, ());
+    token_admin.mint(&contract_id, &10_000_000);
+
+    let client = AccordContractClient::new(&env, &contract_id);
+    client.initialize(
+        &soroban_sdk::vec![&env, owner_a.clone(), owner_b.clone(), owner_c.clone()],
+        &soroban_sdk::vec![&env, 1, 5, 1], // owner_a has weight 1, owner_b has weight 5
+        &2,
+        &0,
+    );
+
+    // Set identical spending limit of 1000 for both owner_a and owner_b
+    let limit_a_id = client.create_spending_limit_proposal(
+        &owner_c,
+        &owner_a,
+        &token_client.address,
+        &1000,
+        &str(&env, "Limit A"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_b, &limit_a_id);
+    client.execute(&owner_a, &limit_a_id);
+
+    let limit_b_id = client.create_spending_limit_proposal(
+        &owner_c,
+        &owner_b,
+        &token_client.address,
+        &1000,
+        &str(&env, "Limit B"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_b, &limit_b_id);
+    client.execute(&owner_a, &limit_b_id);
+
+    // Both should be able to create a proposal for exactly 1000
+    let ok_id_a = client.create_proposal(
+        &owner_a,
+        &t(&env, &owner_c, 1000, &token_client.address),
+        &str(&env, "Transfer A OK"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert!(ok_id_a > 0);
+
+    let ok_id_b = client.create_proposal(
+        &owner_b,
+        &t(&env, &owner_c, 1000, &token_client.address),
+        &str(&env, "Transfer B OK"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert!(ok_id_b > 0);
+
+    // But neither should be able to create one for 1001 (limit exceeded)
+    let err_a = client.try_create_proposal(
+        &owner_a,
+        &t(&env, &owner_c, 1001, &token_client.address), // 1001 > 1000 limit
+        &str(&env, "Transfer A Err"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(err_a, Err(Ok(ContractError::SpendingLimitExceeded)));
+
+    let err_b = client.try_create_proposal(
+        &owner_b,
+        &t(&env, &owner_c, 1001, &token_client.address), // 1001 > 1000 limit
+        &str(&env, "Transfer B Err"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(err_b, Err(Ok(ContractError::SpendingLimitExceeded)));
+}
+
+#[test]
+fn changing_weight_does_not_affect_spending_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+
+    let token_contract = env.register_stellar_asset_contract_v2(owner_c.clone());
+    let token_client = token::Client::new(&env, &token_contract.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    client.initialize(
+        &soroban_sdk::vec![&env, owner_a.clone(), owner_b.clone(), owner_c.clone()],
+        &soroban_sdk::vec![&env, 1, 1, 1], // all weights 1 initially
+        &2,
+        &0,
+    );
+
+    // Set spending limit of 5000 for owner_a
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_b,
+        &owner_a,
+        &token_client.address,
+        &5000,
+        &str(&env, "Limit A"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(5000)
+    );
+
+    // Now change owner_a's weight to 10
+    let weight_id = client.create_change_weight_proposal(
+        &owner_b,
+        &owner_a,
+        &10,
+        &str(&env, "Weight A to 10"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &weight_id);
+    client.approve(&owner_b, &weight_id);
+    client.execute(&owner_c, &weight_id);
+
+    // Spending limit should still be 5000
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(5000)
+    );
+
+    // Now change the spending limit to 10000
+    let limit_id_2 = client.create_spending_limit_proposal(
+        &owner_b,
+        &owner_a,
+        &token_client.address,
+        &10000,
+        &str(&env, "Limit A to 10000"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &limit_id_2);
+    client.approve(&owner_b, &limit_id_2);
+    client.execute(&owner_c, &limit_id_2);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(10000)
+    );
+}
