@@ -426,35 +426,7 @@ Frontend utilities should live in `frontend/src/lib/soroban.ts`:
 | [CONTRACT_API.md](CONTRACT_API.md)                                        | Full contract function reference                               |
 | [SETUP.md](SETUP.md)                                                      | Developer setup and deployment instructions                    |
 
----
+## Security Note: Governance Controls vs Spending Limits
 
-## 10. Quorum Model: Absolute Weight Threshold
-
-### Decision
-
-The contract uses an **absolute weight threshold** to determine how much approval weight a proposal requires. The threshold is a single `u32` value stored as `THRESH` in instance storage. When a proposal is created, it snapshots the current threshold as `Proposal.quorum_weight`. A proposal reaches `Ready` status when the cumulative weight of its approvals meets or exceeds that snapshotted value.
-
-The **percentage-of-total-weight** model was considered and rejected. Under that model the required quorum would automatically scale as owners are added, removed, or reweighted — for example, adding a new owner would silently raise the weight required for all future proposals. While this keeps the quorum proportionally stable, it introduces implicit, hard-to-audit side effects: a routine owner addition could inadvertently prevent a pending proposal from ever reaching quorum, or make previously-achievable quorum levels suddenly unreachable, without any explicit governance action.
-
-### Practical implications for administrators
-
-| Action | Effect on future proposals | Effect on existing proposals |
-|--------|---------------------------|------------------------------|
-| Add an owner | `total_weight` increases; **threshold unchanged** — future proposals require the same absolute weight | None — quorum_weight is snapshotted at creation |
-| Remove an owner | `total_weight` decreases; **threshold unchanged** unless removal would make it unreachable | None |
-| Change an owner's weight | `total_weight` adjusts; **threshold unchanged** | None |
-| Execute a `ChangeThreshold` proposal | **Threshold changes explicitly** — all future proposals use the new value | None — existing snapshots are immutable |
-
-In short: **the quorum requirement for a new proposal only changes when owners explicitly vote to change it**. No other event — owner additions, removals, or reweightings — silently alters what future proposals require.
-
-### Validation invariants
-
-The contract enforces three invariants that keep the threshold consistent with the absolute-weight model at all times:
-
-1. **At initialization**: `threshold` is validated against `total_weight` (the sum of all initial owner weights), not the count of owners. A threshold that exceeds `total_weight` would be immediately unachievable and is rejected with `InvalidThreshold`.
-
-2. **On `create_change_threshold_proposal`**: the proposed new threshold is validated against the current `total_weight`. A threshold higher than the total achievable weight is rejected.
-
-3. **On `create_remove_owner_proposal`**: removal is rejected with `WouldBreakThreshold` if `total_weight − removed_owner_weight < threshold`. This ensures the threshold remains achievable after the removal executes.
-
-The `ChangeOwnerWeight` execution path enforces the same invariant (3) on active proposals: it checks that no `Pending` or `Ready` proposal has a `quorum_weight` exceeding the new `total_weight` before committing the weight change.
+**Spending limits and voting weights are strictly independent.**
+An owner's voting weight controls their governance power (e.g. approving proposals), while their spending limit controls the maximum token amount they can propose to transfer. Changing an owner's voting weight does not affect their spending limits, and vice versa. They are managed by completely separate storage keys and governance proposals.

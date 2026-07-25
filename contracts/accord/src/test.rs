@@ -1170,6 +1170,72 @@ fn get_version_returns_current_version() {
     assert_eq!(client.get_version(), 1);
 }
 
+// ─── get_required_quorum_weight ───────────────────────────────────────────────
+
+/// The view function must return the same quorum weight that gets stored on a
+/// proposal created immediately afterwards.
+#[test]
+fn get_required_quorum_weight_matches_newly_created_proposal() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+
+    // Read the view before creating any proposal.
+    let reported = client.get_required_quorum_weight();
+
+    // Create a proposal and check its stored quorum_weight.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Quorum match test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let proposal = client.get_proposal(&id);
+
+    assert_eq!(
+        reported,
+        proposal.quorum_weight,
+        "get_required_quorum_weight() must equal the quorum_weight stored on the next created proposal"
+    );
+}
+
+/// The view function must reflect the updated threshold after a
+/// change-threshold proposal is executed.
+#[test]
+fn get_required_quorum_weight_updates_after_threshold_change() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    // Initial threshold is 2.
+    assert_eq!(client.get_required_quorum_weight(), 2);
+
+    // Propose and execute a threshold change to 3.
+    let change_id = client.create_change_threshold_proposal(
+        &owner_a,
+        &3,
+        &str(&env, "Raise threshold to 3"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_b, &change_id);
+    client.execute(&owner_c, &change_id);
+
+    // View must now reflect the new threshold.
+    assert_eq!(
+        client.get_required_quorum_weight(),
+        3,
+        "get_required_quorum_weight() must return the updated threshold after a change"
+    );
+
+    // A proposal created now must also carry the updated quorum weight.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Post-change proposal"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(client.get_proposal(&id).quorum_weight, 3);
+}
+
 #[test]
 fn is_owner_returns_correct_results() {
     let (_, client, owner_a, _, _, non_owner, _) = setup(2);
@@ -2513,8 +2579,8 @@ fn change_weight_full_lifecycle() {
     let id = client.create_change_weight_proposal(
         &owner_a,
         &owner_b,
-        &5,
-        &str(&env, "Change owner_b weight to 5"),
+        &2,
+        &str(&env, "Change owner_b weight to 2"),
         &DEADLINE,
     );
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
@@ -2526,8 +2592,8 @@ fn change_weight_full_lifecycle() {
     client.execute(&owner_c, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 
-    // Total weight should be: old(3) - old_owner_b_weight(1) + new_owner_b_weight(5) = 7.
-    assert_eq!(client.get_total_weight(), 7);
+    // Total weight should be: old(3) - old_owner_b_weight(1) + new_owner_b_weight(2) = 4.
+    assert_eq!(client.get_total_weight(), 4);
 }
 
 #[test]
@@ -2641,7 +2707,175 @@ fn change_weight_rejects_invalid_weight() {
     );
 }
 
+#[test]
+fn change_weight_rejects_zero_at_creation_and_execution() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(1);
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &owner_b,
+            &0,
+            &str(&env, "Zero is removal"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+
+    // Simulate an old or malformed stored proposal: execute must independently
+    // reject zero rather than creating a listed but non-voting owner.
+    let proposal = Proposal {
+        id: 999,
+        proposer: owner_a.clone(),
+        description: str(&env, "Malformed zero weight"),
+        deadline: DEADLINE,
+        approvals: 1,
+        status: ProposalStatus::Ready,
+        kind: ProposalKind::ChangeOwnerWeight(owner_b.clone(), 0),
+        ready_at: NOW,
+        quorum_weight: 1,
+        category: ProposalCategory::Other,
+    };
+    write_proposal(&env, &proposal);
+    assert_eq!(
+        client.try_execute(&owner_c, &999),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+    assert_eq!(client.get_total_weight(), 3);
+}
+
+#[test]
+fn change_weight_enforces_single_owner_cap_at_creation_and_execution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let mut owners = Vec::new(&env);
+    owners.push_back(a.clone());
+    owners.push_back(b.clone());
+    owners.push_back(c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(2);
+    weights.push_back(2);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &1, &0);
+
+    // 5 / 9 exceeds the default 50% cap; 4 / 8 is exactly at the cap.
+    assert_eq!(
+        client.try_create_change_weight_proposal(&a, &a, &5, &str(&env, "Over cap"), &DEADLINE),
+        Err(Ok(ContractError::SingleOwnerWeightCapExceeded))
+    );
+    let pending = client.create_change_weight_proposal(&a, &a, &4, &str(&env, "At cap"), &DEADLINE);
+
+    // Reduce B first. The pending A=4 change now yields 4 / 7, so it must fail
+    // when executed even though it was valid when created (4 / 8).
+    let reduce_b =
+        client.create_change_weight_proposal(&a, &b, &1, &str(&env, "Reduce B"), &DEADLINE);
+    client.approve(&a, &reduce_b);
+    client.execute(&c, &reduce_b);
+    client.approve(&a, &pending);
+    assert_eq!(
+        client.try_execute(&c, &pending),
+        Err(Ok(ContractError::SingleOwnerWeightCapExceeded))
+    );
+}
+
+#[test]
+fn concentrated_weight_can_authorize_sensitive_action_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    let heavy = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let mut owners = Vec::new(&env);
+    owners.push_back(heavy.clone());
+    owners.push_back(b);
+    owners.push_back(c);
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &3, &0);
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(heavy);
+    client.set_guardian(&approvers, &Address::generate(&env));
+}
+
+#[test]
+fn max_single_owner_weight_cap_is_configurable_but_never_allows_a_majority() {
+    let (env, client, owner_a, owner_b, _, _, _) = setup(2);
+    assert_eq!(client.get_max_single_owner_weight_pct(), 50);
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_b);
+    client.set_max_single_owner_weight_pct(&approvers, &40);
+    assert_eq!(client.get_max_single_owner_weight_pct(), 40);
+    assert_eq!(
+        client.try_set_max_single_owner_weight_pct(&approvers, &51),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+}
+
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
+
+// ─── ProposalCreatedEvent weight snapshot ────────────────────────────────────
+
+/// Verifies that `ProposalCreatedEvent` captures `quorum_weight` and
+/// `total_weight_at_creation` at the moment of creation, and that those
+/// recorded values are unaffected by weight changes made afterwards.
+#[test]
+fn test_proposal_created_event_snapshots_weights() {
+    // 3 owners each with weight 1, threshold 2 → total_weight = 3.
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let recipient = Address::generate(&env);
+    let _id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Snapshot test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Capture the ProposalCreatedEvent emitted by the creation call.
+    let all_events = env.events().all();
+    let contract_events = all_events.filter_by_contract(&client.address);
+    assert!(!contract_events.events().is_empty(), "expected a created event");
+
+    let event_data = match &contract_events.events().first().unwrap().body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalCreatedEvent = event_data.into_val(&env);
+
+    // At creation: threshold = 2, total_weight = 3.
+    assert_eq!(event.quorum_weight, 2, "quorum_weight should equal the threshold at creation");
+    assert_eq!(event.total_weight_at_creation, 3, "total_weight_at_creation should equal the sum of all owner weights at creation");
+
+    // Remove owner_c, reducing the live total weight to 2.
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_c,
+        &str(&env, "Remove owner_c"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_b, &remove_id);
+    client.execute(&owner_b, &remove_id);
+
+    // Live total weight is now 2.
+    assert_eq!(client.get_total_weight(), 2, "total weight after removal should be 2");
+
+    // The original captured event must still reflect the values from creation time.
+    assert_eq!(event.quorum_weight, 2, "historical quorum_weight must be unchanged after owner removal");
+    assert_eq!(event.total_weight_at_creation, 3, "historical total_weight_at_creation must be unchanged after owner removal");
+}
 
 proptest! {
     // Soroban builds a fresh Env per case, so keep the case count modest.
@@ -2705,6 +2939,84 @@ proptest! {
             client.try_approve(&first, &id),
             Err(Ok(ContractError::AlreadyApproved))
         );
+    }
+
+    /// Across valid owner additions, removals, and weight changes, the cached
+    /// total must always equal the weights observable for every current owner.
+    #[test]
+    fn total_weight_matches_all_current_owner_weights(
+        operations in proptest::collection::vec((0u8..=2, 1u32..=10), 1..=20)
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let mut owners = Vec::new(&env);
+        let mut model_weights: std::vec::Vec<u32> = std::vec::Vec::new();
+        for _ in 0..3 {
+            owners.push_back(Address::generate(&env));
+            model_weights.push(1);
+        }
+        let mut initial_weights = Vec::new(&env);
+        initial_weights.push_back(1); initial_weights.push_back(1); initial_weights.push_back(1);
+        client.initialize(&owners, &initial_weights, &1, &0);
+
+        for (kind, seed) in operations {
+            let proposer = owners.get(0).unwrap();
+            match kind {
+                // Add only below MAX_OWNERS. New owners always start at weight 1.
+                0 if owners.len() < 20 => {
+                    let new_owner = Address::generate(&env);
+                    let id = client.create_add_owner_proposal(&proposer, &new_owner, &str(&env, "fuzz add"), &DEADLINE);
+                    client.approve(&proposer, &id);
+                    client.execute(&proposer, &id);
+                    owners.push_back(new_owner);
+                    model_weights.push(1);
+                }
+                // Preserve the contract's minimum owner-count constraint for a
+                // threshold of one: never remove below two owners.
+                1 if owners.len() > 2 => {
+                    let index = (seed as usize) % owners.len() as usize;
+                    let target = owners.get(index as u32).unwrap();
+                    let id = client.create_remove_owner_proposal(&proposer, &target, &str(&env, "fuzz remove"), &DEADLINE);
+                    client.approve(&proposer, &id);
+                    client.execute(&proposer, &id);
+                    let mut next_owners = Vec::new(&env);
+                    let mut next_weights = std::vec::Vec::new();
+                    for i in 0..owners.len() {
+                        if i != index as u32 {
+                            next_owners.push_back(owners.get(i).unwrap());
+                            next_weights.push(model_weights[i as usize]);
+                        }
+                    }
+                    owners = next_owners;
+                    model_weights = next_weights;
+                }
+                // Only propose weights that satisfy the configured 50% cap.
+                2 => {
+                    let index = (seed as usize) % owners.len() as usize;
+                    let new_weight = seed % 10 + 1;
+                    let total: u32 = model_weights.iter().sum();
+                    let resulting_total = total - model_weights[index] + new_weight;
+                    if new_weight * 100 <= resulting_total * 50 {
+                        let target = owners.get(index as u32).unwrap();
+                        let id = client.create_change_weight_proposal(&proposer, &target, &new_weight, &str(&env, "fuzz weight"), &DEADLINE);
+                        client.approve(&proposer, &id);
+                        client.execute(&proposer, &id);
+                        model_weights[index] = new_weight;
+                    }
+                }
+                _ => {}
+            }
+
+            let mut observed_total = 0u32;
+            for owner in owners.iter() {
+                observed_total += client.get_owner_weight(&owner);
+            }
+            prop_assert_eq!(observed_total, client.get_total_weight());
+        }
     }
 
     #[test]
@@ -3484,4 +3796,171 @@ fn set_spending_limit_execute_emits_spending_limit_event() {
     let event2: SetSpendingLimitExecutedEvent = latest_data.into_val(&env);
     assert_eq!(event2.previous_limit, Some(1_000_000));
     assert_eq!(event2.new_limit, 2_000_000);
+}
+
+
+
+#[test]
+fn spending_limit_independent_of_voting_weight() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+
+    let token_contract = env.register_stellar_asset_contract_v2(owner_c.clone());
+    let token_client = token::Client::new(&env, &token_contract.address());
+    let token_admin = token::StellarAssetClient::new(&env, &token_contract.address());
+
+    // Mint tokens to the contract
+    let contract_id = env.register(AccordContract, ());
+    token_admin.mint(&contract_id, &10_000_000);
+
+    let client = AccordContractClient::new(&env, &contract_id);
+    client.initialize(
+        &soroban_sdk::vec![&env, owner_a.clone(), owner_b.clone(), owner_c.clone()],
+        &soroban_sdk::vec![&env, 1, 5, 1], // owner_a has weight 1, owner_b has weight 5
+        &2,
+        &0,
+    );
+
+    // Set identical spending limit of 1000 for both owner_a and owner_b
+    let limit_a_id = client.create_spending_limit_proposal(
+        &owner_c,
+        &owner_a,
+        &token_client.address,
+        &1000,
+        &str(&env, "Limit A"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_b, &limit_a_id);
+    client.execute(&owner_a, &limit_a_id);
+
+    let limit_b_id = client.create_spending_limit_proposal(
+        &owner_c,
+        &owner_b,
+        &token_client.address,
+        &1000,
+        &str(&env, "Limit B"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_b, &limit_b_id);
+    client.execute(&owner_a, &limit_b_id);
+
+    // Both should be able to create a proposal for exactly 1000
+    let ok_id_a = client.create_proposal(
+        &owner_a,
+        &t(&env, &owner_c, 1000, &token_client.address),
+        &str(&env, "Transfer A OK"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert!(ok_id_a > 0);
+
+    let ok_id_b = client.create_proposal(
+        &owner_b,
+        &t(&env, &owner_c, 1000, &token_client.address),
+        &str(&env, "Transfer B OK"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert!(ok_id_b > 0);
+
+    // But neither should be able to create one for 1001 (limit exceeded)
+    let err_a = client.try_create_proposal(
+        &owner_a,
+        &t(&env, &owner_c, 1001, &token_client.address), // 1001 > 1000 limit
+        &str(&env, "Transfer A Err"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(err_a, Err(Ok(ContractError::SpendingLimitExceeded)));
+
+    let err_b = client.try_create_proposal(
+        &owner_b,
+        &t(&env, &owner_c, 1001, &token_client.address), // 1001 > 1000 limit
+        &str(&env, "Transfer B Err"),
+        &(env.ledger().timestamp() + 1000),
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(err_b, Err(Ok(ContractError::SpendingLimitExceeded)));
+}
+
+#[test]
+fn changing_weight_does_not_affect_spending_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+
+    let token_contract = env.register_stellar_asset_contract_v2(owner_c.clone());
+    let token_client = token::Client::new(&env, &token_contract.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    client.initialize(
+        &soroban_sdk::vec![&env, owner_a.clone(), owner_b.clone(), owner_c.clone()],
+        &soroban_sdk::vec![&env, 1, 1, 1], // all weights 1 initially
+        &2,
+        &0,
+    );
+
+    // Set spending limit of 5000 for owner_a
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_b,
+        &owner_a,
+        &token_client.address,
+        &5000,
+        &str(&env, "Limit A"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(5000)
+    );
+
+    // Now change owner_a's weight to 10
+    let weight_id = client.create_change_weight_proposal(
+        &owner_b,
+        &owner_a,
+        &10,
+        &str(&env, "Weight A to 10"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &weight_id);
+    client.approve(&owner_b, &weight_id);
+    client.execute(&owner_c, &weight_id);
+
+    // Spending limit should still be 5000
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(5000)
+    );
+
+    // Now change the spending limit to 10000
+    let limit_id_2 = client.create_spending_limit_proposal(
+        &owner_b,
+        &owner_a,
+        &token_client.address,
+        &10000,
+        &str(&env, "Limit A to 10000"),
+        &(env.ledger().timestamp() + 1000),
+    );
+    client.approve(&owner_a, &limit_id_2);
+    client.approve(&owner_b, &limit_id_2);
+    client.execute(&owner_c, &limit_id_2);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(10000)
+    );
 }
