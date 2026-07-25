@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Proposal, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
@@ -111,7 +111,7 @@ function KindSummary({ proposal }: { proposal: Proposal }): ReactNode {
   }
 }
 
-export function ProposalCard({
+export const ProposalCard = React.memo(function ProposalCard({
   proposal,
   walletAddress,
   onApprove,
@@ -304,4 +304,4 @@ export function ProposalCard({
       </div>
     </div>
   );
-}
+});
