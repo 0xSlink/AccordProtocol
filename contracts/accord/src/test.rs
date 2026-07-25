@@ -90,7 +90,7 @@ fn setup_with_timelock(
     weights.push_back(1);
     weights.push_back(1);
     weights.push_back(1);
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -137,7 +137,7 @@ fn initialize_accepts_maximum_owners() {
     }
 
     // Initialize should succeed
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -156,7 +156,9 @@ fn initialize_rejects_second_call() {
     owners.push_back(owner_b);
     owners.push_back(owner_c);
     let mut weights = Vec::new(&env);
-    for _ in 0..owners.len() { weights.push_back(1); }
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
     assert_eq!(
         client.try_initialize(&owners, &weights, &2, &0),
         Err(Ok(ContractError::AlreadyInitialized))
@@ -172,7 +174,9 @@ fn initialize_rejects_threshold_zero() {
     let mut owners = Vec::new(&env);
     owners.push_back(Address::generate(&env));
     let mut weights = Vec::new(&env);
-    for _ in 0..owners.len() { weights.push_back(1); }
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
     assert_eq!(
         client.try_initialize(&owners, &weights, &0, &0),
         Err(Ok(ContractError::InvalidThreshold))
@@ -188,7 +192,9 @@ fn initialize_rejects_threshold_above_count() {
     let mut owners = Vec::new(&env);
     owners.push_back(Address::generate(&env));
     let mut weights = Vec::new(&env);
-    for _ in 0..owners.len() { weights.push_back(1); }
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
     assert_eq!(
         client.try_initialize(&owners, &weights, &2, &0),
         Err(Ok(ContractError::InvalidThreshold))
@@ -206,7 +212,9 @@ fn initialize_rejects_duplicate_owners() {
     owners.push_back(dup.clone());
     owners.push_back(dup);
     let mut weights = Vec::new(&env);
-    for _ in 0..owners.len() { weights.push_back(1); }
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
     assert_eq!(
         client.try_initialize(&owners, &weights, &1, &0),
         Err(Ok(ContractError::DuplicateOwner))
@@ -226,14 +234,24 @@ fn create_proposal_returns_sequential_ids() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "First"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
     let id2 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 2_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            2_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Second"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -249,7 +267,12 @@ fn create_proposal_rejects_non_owner() {
     assert_eq!(
         client.try_create_proposal(
             &non_owner,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address
+            ),
             &str(&env, "Unauthorized"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -279,7 +302,12 @@ fn create_proposal_rejects_past_deadline() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address
+            ),
             &str(&env, "Stale"),
             &(NOW - 1),
             &ProposalCategory::Transfer,
@@ -294,7 +322,12 @@ fn create_proposal_rejects_empty_description() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address
+            ),
             &str(&env, ""),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -325,7 +358,12 @@ fn create_proposal_accepts_valid_token() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Valid token"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -408,7 +446,12 @@ fn create_proposal_stores_payroll_category() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Monthly salaries"),
         &DEADLINE,
         &ProposalCategory::Payroll,
@@ -421,7 +464,12 @@ fn create_proposal_stores_grant_category() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Developer grant"),
         &DEADLINE,
         &ProposalCategory::Grant,
@@ -460,7 +508,12 @@ fn approve_increments_count_and_sets_flag() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(3);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -477,7 +530,12 @@ fn approve_transitions_pending_to_ready() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -493,7 +551,12 @@ fn approve_rejects_double_approve() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -510,7 +573,12 @@ fn approve_rejects_non_owner() {
     let (env, client, owner_a, _, _, non_owner, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -532,7 +600,12 @@ fn approve_returns_arithmetic_error_on_overflow() {
         deadline: DEADLINE,
         approvals: u32::MAX,
         status: ProposalStatus::Pending,
-        kind: ProposalKind::Transfer(t(&env, &Address::generate(&env), 1_000_000_i128, &token_client.address)),
+        kind: ProposalKind::Transfer(t(
+            &env,
+            &Address::generate(&env),
+            1_000_000_i128,
+            &token_client.address,
+        )),
         ready_at: 0,
         quorum_weight: 2,
         category: ProposalCategory::Transfer,
@@ -555,7 +628,12 @@ fn revoke_decrements_count_and_clears_flag() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -571,7 +649,12 @@ fn revoke_transitions_ready_back_to_pending() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -588,7 +671,12 @@ fn revoke_rejects_when_not_previously_approved() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -606,7 +694,12 @@ fn revoke_allows_reapprove() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -623,7 +716,12 @@ fn revoke_and_reapprove_cycles_ready_pending_ready() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -654,7 +752,12 @@ fn has_approved_returns_false_after_revoke() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -681,9 +784,9 @@ fn execute_transfers_tokens_to_recipient() {
     );
     client.approve(&owner_a, &id);
     client.approve(&owner_b, &id);
-    let before = token_client.balance(&recipient);
+    client.approve(&owner_c, &id);
     client.execute(&owner_c, &id);
-    assert_eq!(token_client.balance(&recipient) - before, amount);
+    assert_eq!(token_client.balance(&recipient), amount);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
@@ -692,7 +795,12 @@ fn execute_rejects_when_threshold_not_met() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Short"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -709,7 +817,12 @@ fn execute_rejects_non_owner() {
     let (env, client, owner_a, owner_b, _, non_owner, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -727,7 +840,12 @@ fn execute_rejects_already_executed() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -773,7 +891,12 @@ fn proposal_shows_expired_after_deadline() {
     let deadline = NOW + 3_600;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Short window"),
         &deadline,
         &ProposalCategory::Transfer,
@@ -788,7 +911,12 @@ fn approve_rejects_expired_proposal() {
     let deadline = NOW + 3_600;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Expiring"),
         &deadline,
         &ProposalCategory::Transfer,
@@ -806,7 +934,12 @@ fn execute_rejects_expired_even_if_approved() {
     let deadline = NOW + 3_600;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Approved but expired"),
         &deadline,
         &ProposalCategory::Transfer,
@@ -826,7 +959,12 @@ fn expired_status_takes_priority_over_ready() {
     let deadline = NOW + 3_600;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Ready then expired"),
         &deadline,
         &ProposalCategory::Transfer,
@@ -863,7 +1001,12 @@ fn get_proposals_paged_returns_correct_window() {
     for _ in 0..5_u32 {
         client.create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address,
+            ),
             &str(&env, "Batch"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -883,7 +1026,12 @@ fn get_proposals_paged_returns_empty_beyond_offset() {
     for _ in 0..3_u32 {
         client.create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address,
+            ),
             &str(&env, "Test"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -899,21 +1047,36 @@ fn get_total_proposals_counts_all_ever_created() {
     // Create 3 proposals
     let id1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Proposal 1"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
     let id2 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Proposal 2"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
     let _id3 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Proposal 3"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -990,7 +1153,7 @@ fn full_lifecycle_5of5() {
     weights.push_back(1);
     owners.push_back(owner_d.clone());
     owners.push_back(owner_e.clone());
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -1058,7 +1221,7 @@ fn execute_fails_when_balance_insufficient() {
     weights.push_back(1);
     weights.push_back(1);
     weights.push_back(1);
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -1124,7 +1287,12 @@ fn create_proposal_rejects_deadline_at_now() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address
+            ),
             &str(&env, "Deadline at now"),
             &NOW, // exactly the current timestamp
             &ProposalCategory::Transfer,
@@ -1138,7 +1306,12 @@ fn get_approvers_returns_only_approved_addresses() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(3);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1158,7 +1331,12 @@ fn get_approvers_returns_empty_when_none_have_approved() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1173,7 +1351,12 @@ fn get_approvers_excludes_revoked_approval() {
     let (env, client, owner_a, owner_b, _, _, token_client) = setup(3);
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Pay"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1762,7 +1945,7 @@ fn create_add_owner_proposal_rejects_at_max_owners() {
     for _ in 1..20 {
         owners.push_back(Address::generate(&env));
     }
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -1827,7 +2010,12 @@ fn spending_limit_full_lifecycle() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), (limit + 1), &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                limit + 1,
+                &token_client.address
+            ),
             &str(&env, "Over limit"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -1843,7 +2031,12 @@ fn proposer_without_limit_is_unrestricted() {
     // No limit configured for owner_a, so a large amount is allowed.
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Large amount, no limit"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1874,7 +2067,12 @@ fn spending_limit_cumulative_across_multiple_proposals() {
     // First proposal of 6M succeeds (under 10M).
     let id1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 6_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            6_000_000,
+            &token_client.address,
+        ),
         &str(&env, "First 6M"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1890,7 +2088,12 @@ fn spending_limit_cumulative_across_multiple_proposals() {
     assert_eq!(
         client.try_create_proposal(
             &owner_a,
-            &t(&env, &Address::generate(&env), 5_000_000, &token_client.address),
+            &t(
+                &env,
+                &Address::generate(&env),
+                5_000_000,
+                &token_client.address
+            ),
             &str(&env, "Second 5M"),
             &DEADLINE,
             &ProposalCategory::Transfer,
@@ -1901,7 +2104,12 @@ fn spending_limit_cumulative_across_multiple_proposals() {
     // Third proposal of 4M succeeds (6M + 4M = 10M, exactly at the limit).
     let id3 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 4_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            4_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Third 4M"),
         &DEADLINE,
         &ProposalCategory::Transfer,
@@ -1928,8 +2136,12 @@ fn spending_limit_cumulative_with_same_token_multi_transfer() {
     let limit: i128 = 10_000_000;
 
     let limit_id = client.create_spending_limit_proposal(
-        &owner_a, &owner_a, &token_client.address, &limit,
-        &str(&env, "Set limit"), &DEADLINE,
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &limit,
+        &str(&env, "Set limit"),
+        &DEADLINE,
     );
     client.approve(&owner_a, &limit_id);
     client.approve(&owner_b, &limit_id);
@@ -1939,8 +2151,16 @@ fn spending_limit_cumulative_with_same_token_multi_transfer() {
     let recipient1 = Address::generate(&env);
     let recipient2 = Address::generate(&env);
     let mut transfers = Vec::new(&env);
-    transfers.push_back(Transfer { to: recipient1, token: token_client.address.clone(), amount: 6_000_000 });
-    transfers.push_back(Transfer { to: recipient2, token: token_client.address.clone(), amount: 5_000_000 });
+    transfers.push_back(Transfer {
+        to: recipient1,
+        token: token_client.address.clone(),
+        amount: 6_000_000,
+    });
+    transfers.push_back(Transfer {
+        to: recipient2,
+        token: token_client.address.clone(),
+        amount: 5_000_000,
+    });
     // 6M + 5M = 11M, exceeding the 10M limit.
     assert_eq!(
         client.try_create_proposal(
@@ -1965,8 +2185,12 @@ fn spending_limit_different_tokens_independent() {
 
     // Set limit on first token only.
     let limit_id = client.create_spending_limit_proposal(
-        &owner_a, &owner_a, &token_client.address, &1_000_000,
-        &str(&env, "Limit token 1"), &DEADLINE,
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &1_000_000,
+        &str(&env, "Limit token 1"),
+        &DEADLINE,
     );
     client.approve(&owner_a, &limit_id);
     client.approve(&owner_b, &limit_id);
@@ -1975,8 +2199,15 @@ fn spending_limit_different_tokens_independent() {
     // Spend on token 1 (900k).
     let id1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 900_000, &token_client.address),
-        &str(&env, "Use token 1"), &DEADLINE, &ProposalCategory::Transfer,
+        &t(
+            &env,
+            &Address::generate(&env),
+            900_000,
+            &token_client.address,
+        ),
+        &str(&env, "Use token 1"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
     );
     client.approve(&owner_a, &id1);
     client.approve(&owner_b, &id1);
@@ -1997,8 +2228,15 @@ fn spending_limit_different_tokens_independent() {
     // Large proposal on token 2 (unrestricted) succeeds.
     let id2 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 999_999_999, &token2_client.address),
-        &str(&env, "Large token 2"), &DEADLINE, &ProposalCategory::Transfer,
+        &t(
+            &env,
+            &Address::generate(&env),
+            999_999_999,
+            &token2_client.address,
+        ),
+        &str(&env, "Large token 2"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
     );
     assert!(id2 > 0);
 }
@@ -2018,8 +2256,12 @@ fn spending_limit_window_expiry_resets_cumulative() {
     let limit: i128 = 10_000_000;
 
     let limit_id = client.create_spending_limit_proposal(
-        &owner_a, &owner_a, &token_client.address, &limit,
-        &str(&env, "Set limit"), &DEADLINE,
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &limit,
+        &str(&env, "Set limit"),
+        &DEADLINE,
     );
     client.approve(&owner_a, &limit_id);
     client.approve(&owner_b, &limit_id);
@@ -2028,8 +2270,15 @@ fn spending_limit_window_expiry_resets_cumulative() {
     // Spend 6M.
     let id1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 6_000_000, &token_client.address),
-        &str(&env, "Spend 6M"), &DEADLINE, &ProposalCategory::Transfer,
+        &t(
+            &env,
+            &Address::generate(&env),
+            6_000_000,
+            &token_client.address,
+        ),
+        &str(&env, "Spend 6M"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
     );
     client.approve(&owner_a, &id1);
     client.approve(&owner_b, &id1);
@@ -2057,8 +2306,15 @@ fn spending_limit_window_expiry_resets_cumulative() {
     let far_deadline = NOW + 2_592_000 + 86_400;
     let id2 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 5_000_000, &token_client.address),
-        &str(&env, "New window spend"), &far_deadline, &ProposalCategory::Transfer,
+        &t(
+            &env,
+            &Address::generate(&env),
+            5_000_000,
+            &token_client.address,
+        ),
+        &str(&env, "New window spend"),
+        &far_deadline,
+        &ProposalCategory::Transfer,
     );
     assert!(id2 > 0);
 }
@@ -2145,12 +2401,18 @@ fn change_weight_with_active_proposals_passes_invariant_check() {
     client.approve(&owner_c, &weight_id);
     client.execute(&owner_c, &weight_id);
 
-    assert_eq!(client.get_proposal(&weight_id).status, ProposalStatus::Executed);
+    assert_eq!(
+        client.get_proposal(&weight_id).status,
+        ProposalStatus::Executed
+    );
     assert_eq!(client.get_total_weight(), 4);
 
     // The original transfer proposal is still viable.
     client.approve(&owner_b, &transfer_id);
-    assert_eq!(client.get_proposal(&transfer_id).status, ProposalStatus::Ready);
+    assert_eq!(
+        client.get_proposal(&transfer_id).status,
+        ProposalStatus::Ready
+    );
 }
 
 #[test]
@@ -2360,10 +2622,7 @@ fn multi_transfer_success() {
 
     assert_eq!(token_client.balance(&recipient1) - before1, amount1);
     assert_eq!(token_client.balance(&recipient2) - before2, amount2);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Executed
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 #[test]
@@ -2469,13 +2728,15 @@ fn create_proposal_rejects_invalid_transfer_count() {
         token: token_client.address.clone(),
         amount: 1_000_000,
     });
-    assert!(client.try_create_proposal(
-        &owner_a,
-        &one,
-        &str(&env, "One transfer"),
-        &DEADLINE,
-        &ProposalCategory::Transfer,
-    ).is_ok());
+    assert!(client
+        .try_create_proposal(
+            &owner_a,
+            &one,
+            &str(&env, "One transfer"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        )
+        .is_ok());
 
     let mut three = Vec::new(&env);
     for _ in 0..3 {
@@ -2485,13 +2746,15 @@ fn create_proposal_rejects_invalid_transfer_count() {
             amount: 1_000_000,
         });
     }
-    assert!(client.try_create_proposal(
-        &owner_a,
-        &three,
-        &str(&env, "Three transfers"),
-        &DEADLINE,
-        &ProposalCategory::Transfer,
-    ).is_ok());
+    assert!(client
+        .try_create_proposal(
+            &owner_a,
+            &three,
+            &str(&env, "Three transfers"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        )
+        .is_ok());
 }
 
 #[test]
@@ -2646,7 +2909,12 @@ fn weighted_proposal_ready_via_weighted_approval_expires_and_is_swept() {
     let short_deadline = NOW + 100;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Weighted, will expire"),
         &short_deadline,
         &ProposalCategory::Transfer,
@@ -2701,7 +2969,12 @@ fn weighted_proposal_insufficient_weight_expires_not_counted_active() {
     let short_deadline = NOW + 100;
     let id = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "Needs weight 3, has 2"),
         &short_deadline,
         &ProposalCategory::Transfer,
@@ -2760,7 +3033,12 @@ fn weighted_active_count_sequence_execute_expire_sweep() {
     // P1: A approves (3) → Ready, then execute.
     let p1 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "P1-execute"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -2773,7 +3051,12 @@ fn weighted_active_count_sequence_execute_expire_sweep() {
     // P2: B+C approve (1+1=2) → Ready, then expires.
     let p2 = client.create_proposal(
         &owner_b,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "P2-expire"),
         &short_deadline,
         &ProposalCategory::Transfer,
@@ -2785,7 +3068,12 @@ fn weighted_active_count_sequence_execute_expire_sweep() {
     // P3: A approves (3) → Ready, then execute.
     let p3 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "P3-execute"),
         &long_deadline,
         &ProposalCategory::Transfer,
@@ -2808,10 +3096,210 @@ fn weighted_active_count_sequence_execute_expire_sweep() {
     // All proposals are now terminal; a fresh proposal should work.
     let p4 = client.create_proposal(
         &owner_a,
-        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
         &str(&env, "P4-fresh"),
         &long_deadline,
         &ProposalCategory::Transfer,
     );
     assert!(p4 > 0);
+}
+
+// ─── Dedicated Governance Execution Events (issue #238) ──────────────────────
+
+#[test]
+fn add_owner_execute_emits_add_owner_event() {
+    let (env, client, owner_a, owner_b, owner_c, new_owner, _) = setup(2);
+
+    let id = client.create_add_owner_proposal(
+        &owner_a,
+        &new_owner,
+        &str(&env, "Add new owner"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    client.execute(&owner_c, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let a_own_event = contract_events.events().iter().find(|event| {
+        let topics = match &event.body {
+            xdr::ContractEventBody::V0(b) => b.topics.clone(),
+        };
+        topics
+            .first()
+            .map(|t| {
+                let s: Symbol = t.clone().into_val(&env);
+                s == symbol_short!("a_own")
+            })
+            .unwrap_or(false)
+    });
+    assert!(a_own_event.is_some(), "expected an 'a_own' event");
+
+    let event_data = match &a_own_event.unwrap().body {
+        xdr::ContractEventBody::V0(b) => b.data.clone(),
+    };
+    let event: AddOwnerExecutedEvent = event_data.into_val(&env);
+    assert_eq!(event.new_owner, new_owner);
+    assert_eq!(event.owner_count, 4);
+}
+
+#[test]
+fn remove_owner_execute_emits_remove_owner_event() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+
+    let id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_c,
+        &str(&env, "Remove owner_c"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    client.execute(&owner_c, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let r_own_event = contract_events.events().iter().find(|event| {
+        let topics = match &event.body {
+            xdr::ContractEventBody::V0(b) => b.topics.clone(),
+        };
+        topics
+            .first()
+            .map(|t| {
+                let s: Symbol = t.clone().into_val(&env);
+                s == symbol_short!("r_own")
+            })
+            .unwrap_or(false)
+    });
+    assert!(r_own_event.is_some(), "expected an 'r_own' event");
+
+    let event_data = match &r_own_event.unwrap().body {
+        xdr::ContractEventBody::V0(b) => b.data.clone(),
+    };
+    let event: RemoveOwnerExecutedEvent = event_data.into_val(&env);
+    assert_eq!(event.removed_owner, owner_c);
+    assert_eq!(event.owner_count, 2);
+}
+
+#[test]
+fn change_threshold_execute_emits_change_threshold_event() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(3);
+
+    let id = client.create_change_threshold_proposal(
+        &owner_a,
+        &2,
+        &str(&env, "Lower threshold to 2"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    client.approve(&owner_c, &id);
+    client.execute(&owner_c, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let c_thr_event = contract_events.events().iter().find(|event| {
+        let topics = match &event.body {
+            xdr::ContractEventBody::V0(b) => b.topics.clone(),
+        };
+        topics
+            .first()
+            .map(|t| {
+                let s: Symbol = t.clone().into_val(&env);
+                s == symbol_short!("c_thr")
+            })
+            .unwrap_or(false)
+    });
+    assert!(c_thr_event.is_some(), "expected a 'c_thr' event");
+
+    let event_data = match &c_thr_event.unwrap().body {
+        xdr::ContractEventBody::V0(b) => b.data.clone(),
+    };
+    let event: ChangeThresholdExecutedEvent = event_data.into_val(&env);
+    assert_eq!(event.previous_threshold, 3);
+    assert_eq!(event.new_threshold, 2);
+}
+
+#[test]
+fn set_spending_limit_execute_emits_spending_limit_event() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    // First set a limit (no previous limit).
+    let id1 = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &1_000_000,
+        &str(&env, "Set limit"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &id1);
+    client.approve(&owner_b, &id1);
+    client.execute(&owner_c, &id1);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let s_lim_event = contract_events.events().iter().find(|event| {
+        let topics = match &event.body {
+            xdr::ContractEventBody::V0(b) => b.topics.clone(),
+        };
+        topics
+            .first()
+            .map(|t| {
+                let s: Symbol = t.clone().into_val(&env);
+                s == symbol_short!("s_lim")
+            })
+            .unwrap_or(false)
+    });
+    assert!(s_lim_event.is_some(), "expected an 's_lim' event");
+
+    let event_data = match &s_lim_event.unwrap().body {
+        xdr::ContractEventBody::V0(b) => b.data.clone(),
+    };
+    let event: SetSpendingLimitExecutedEvent = event_data.into_val(&env);
+    assert_eq!(event.owner, owner_a);
+    assert_eq!(event.token, token_client.address);
+    assert_eq!(event.previous_limit, None);
+    assert_eq!(event.new_limit, 1_000_000);
+
+    // Change the limit again — now there is a previous limit.
+    let id2 = client.create_spending_limit_proposal(
+        &owner_c,
+        &owner_a,
+        &token_client.address,
+        &2_000_000,
+        &str(&env, "Update limit"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &id2);
+    client.approve(&owner_b, &id2);
+    client.execute(&owner_c, &id2);
+
+    // Find the *last* s_lim event (the latest execution).
+    let contract_events2 = env.events().all().filter_by_contract(&client.address);
+    let mut latest_s_lim = None;
+    for event in contract_events2.events().iter() {
+        let topics = match &event.body {
+            xdr::ContractEventBody::V0(b) => b.topics.clone(),
+        };
+        let is_s_lim = topics
+            .first()
+            .map(|t| {
+                let s: Symbol = t.clone().into_val(&env);
+                s == symbol_short!("s_lim")
+            })
+            .unwrap_or(false);
+        if is_s_lim {
+            latest_s_lim = Some(event);
+        }
+    }
+    let latest = latest_s_lim.expect("expected a second 's_lim' event");
+    let latest_data = match &latest.body {
+        xdr::ContractEventBody::V0(b) => b.data.clone(),
+    };
+    let event2: SetSpendingLimitExecutedEvent = latest_data.into_val(&env);
+    assert_eq!(event2.previous_limit, Some(1_000_000));
+    assert_eq!(event2.new_limit, 2_000_000);
 }
