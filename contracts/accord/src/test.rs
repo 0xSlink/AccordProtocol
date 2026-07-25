@@ -2063,6 +2063,140 @@ fn spending_limit_window_expiry_resets_cumulative() {
     assert!(id2 > 0);
 }
 
+// ─── Change Owner Weight (issue #274) ───────────────────────────────────────────
+
+#[test]
+fn change_weight_full_lifecycle() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+
+    // Owner A (default weight 1) and Owner B (default weight 1).
+    assert_eq!(client.get_total_weight(), 3);
+
+    let id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_b,
+        &5,
+        &str(&env, "Change owner_b weight to 5"),
+        &DEADLINE,
+    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+
+    client.execute(&owner_c, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
+
+    // Total weight should be: old(3) - old_owner_b_weight(1) + new_owner_b_weight(5) = 7.
+    assert_eq!(client.get_total_weight(), 7);
+}
+
+#[test]
+fn change_weight_with_active_proposals_passes_invariant_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &2, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let transfer_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Active while weight changes"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &transfer_id);
+
+    // Change Owner A's weight from 1 to 2. New total = 3 - 1 + 2 = 4.
+    // Active proposal has quorum=2. 2 <= 4, so the invariant check passes.
+    let weight_id = client.create_change_weight_proposal(
+        &owner_b,
+        &owner_a,
+        &2,
+        &str(&env, "Increase owner_a weight"),
+        &DEADLINE,
+    );
+    client.approve(&owner_b, &weight_id);
+    client.approve(&owner_c, &weight_id);
+    client.execute(&owner_c, &weight_id);
+
+    assert_eq!(client.get_proposal(&weight_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_total_weight(), 4);
+
+    // The original transfer proposal is still viable.
+    client.approve(&owner_b, &transfer_id);
+    assert_eq!(client.get_proposal(&transfer_id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn change_weight_rejects_non_existent_owner() {
+    let (env, client, owner_a, _, _, _, _) = setup(2);
+    let non_owner = Address::generate(&env);
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &non_owner,
+            &5,
+            &str(&env, "Change non-owner weight"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::OwnerNotFound))
+    );
+}
+
+#[test]
+fn change_weight_rejects_invalid_weight() {
+    let (env, client, owner_a, owner_b, _, _, _) = setup(2);
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &owner_b,
+            &0,
+            &str(&env, "Weight zero"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &owner_b,
+            &100_001,
+            &str(&env, "Weight too high"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+}
+
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
 
 proptest! {

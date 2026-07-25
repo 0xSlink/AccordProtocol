@@ -40,6 +40,9 @@ pub enum ProposalKind {
     /// SetSpendingLimit(owner, token, limit) — per-owner cap on the amount that
     /// `owner` may propose for `token`. A limit of 0 blocks that token entirely.
     SetSpendingLimit(Address, Address, i128),
+    /// ChangeOwnerWeight(target_owner, new_weight) — updates an existing owner's
+    /// voting weight. The new weight must be within [MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT].
+    ChangeOwnerWeight(Address, u32),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -882,6 +885,96 @@ impl AccordContract {
         Ok(id)
     }
 
+    /// Creates a proposal to change an existing owner's voting weight.
+    ///
+    /// # Arguments
+    /// * `proposer` - Owner proposing the change. Must authorize.
+    /// * `target_owner` - Address of the owner whose weight to change. Must be
+    ///   a current owner.
+    /// * `new_weight` - The new voting weight. Must be within
+    ///   [MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT].
+    pub fn create_change_weight_proposal(
+        env: Env,
+        proposer: Address,
+        target_owner: Address,
+        new_weight: u32,
+        description: String,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        if new_weight < MIN_OWNER_WEIGHT || new_weight > MAX_OWNER_WEIGHT {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let owners = read_owners(&env)?;
+        let mut found = false;
+        for owner in owners.iter() {
+            if owner == target_owner {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(ContractError::OwnerNotFound);
+        }
+
+        if description.is_empty() {
+            return Err(ContractError::EmptyDescription);
+        }
+        if description.len() > MAX_DESCRIPTION_LEN {
+            return Err(ContractError::DescriptionTooLong);
+        }
+
+        let now = env.ledger().timestamp();
+        if deadline <= now {
+            return Err(ContractError::InvalidDeadline);
+        }
+        if deadline - now > MAX_PROPOSAL_DURATION {
+            return Err(ContractError::InvalidDuration);
+        }
+
+        let active = read_active_count(&env);
+        if active >= MAX_ACTIVE_PROPOSALS {
+            return Err(ContractError::TooManyActiveProposals);
+        }
+
+        let threshold = read_threshold(&env)?;
+        let id = read_next_id(&env);
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
+
+        let proposal = Proposal {
+            id,
+            proposer: proposer.clone(),
+            description,
+            deadline,
+            approvals: 0,
+            status: ProposalStatus::Pending,
+            kind: ProposalKind::ChangeOwnerWeight(target_owner, new_weight),
+            ready_at: 0,
+            quorum_weight: threshold,
+            category: ProposalCategory::Other,
+        };
+        write_proposal(&env, &proposal);
+        write_active_count(&env, active + 1);
+
+        env.events().publish(
+            (symbol_short!("created"),),
+            ProposalCreatedEvent {
+                id,
+                proposer,
+                threshold,
+                category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
+            },
+        );
+
+        Ok(id)
+    }
+
     /// Creates a proposal to remove an existing owner from the multisig.
     ///
     /// # Arguments
@@ -1279,6 +1372,32 @@ impl AccordContract {
                 // Reset cumulative spending tracking when a new limit is set.
                 let now = env.ledger().timestamp();
                 write_spent_tracker(&env, owner, token, &SpentTracker { spent: 0, epoch: now });
+            }
+            ProposalKind::ChangeOwnerWeight(target_owner, new_weight) => {
+                let old_weight = read_owner_weight(&env, target_owner);
+                let current_total = read_total_weight(&env);
+                let new_total = current_total
+                    .checked_sub(old_weight)
+                    .ok_or(ContractError::ArithmeticError)?
+                    .checked_add(*new_weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+
+                // Invariant: ensure no active (Pending/Ready) proposal would
+                // become un-quorumable (quorum_weight > new_total_weight).
+                let next_id = read_next_id(&env);
+                for id in 1..next_id {
+                    if let Ok(active_proposal) = read_proposal(&env, id) {
+                        let status = derive_status(&env, &active_proposal);
+                        if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && active_proposal.quorum_weight > new_total
+                        {
+                            return Err(ContractError::WouldBreakThreshold);
+                        }
+                    }
+                }
+
+                write_owner_weight(&env, target_owner, *new_weight);
+                write_total_weight(&env, new_total);
             }
         }
 
