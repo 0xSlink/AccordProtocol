@@ -86,6 +86,7 @@ Specific mechanisms are in place to enforce security boundaries:
 - **Proposal Deadlines**: The `deadline` field and `derive_status` logic ensure proposals cannot be executed indefinitely, protecting against stale approvals.
 - **Active Proposal Cap**: The `MAX_ACTIVE_PROPOSALS` check in `create_proposal` prevents an attacker from exhausting contract storage.
 - **Owner-Only Authentication**: Every state-changing call (`approve`, `revoke`, etc.) uses `require_owner` to ensure only the authorized set can act.
+- **Weighted sensitive-action co-signing (audit conclusion)**: `set_guardian`, `unfreeze`, and `upgrade` reject duplicate addresses before summing approver weights, so a single owner cannot repeat its address to count its weight more than once. They intentionally accept the smallest *distinct* approver list whose combined weight reaches quorum; this may be one owner when that owner legitimately holds enough configured weight. This is acceptable only as an explicit weighted-governance outcome, and the default 50% `ChangeOwnerWeight` cap prevents granting a strict majority through a later weight-change proposal. **Follow-up concern:** initialization can establish a concentrated allocation, so deployers must review initial weights and quorum together; a future release could apply the cap at initialization too if that policy is required.
 
 ### Residual Risks
 

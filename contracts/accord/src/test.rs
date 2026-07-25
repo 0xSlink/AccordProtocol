@@ -2331,8 +2331,8 @@ fn change_weight_full_lifecycle() {
     let id = client.create_change_weight_proposal(
         &owner_a,
         &owner_b,
-        &5,
-        &str(&env, "Change owner_b weight to 5"),
+        &2,
+        &str(&env, "Change owner_b weight to 2"),
         &DEADLINE,
     );
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
@@ -2344,8 +2344,8 @@ fn change_weight_full_lifecycle() {
     client.execute(&owner_c, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 
-    // Total weight should be: old(3) - old_owner_b_weight(1) + new_owner_b_weight(5) = 7.
-    assert_eq!(client.get_total_weight(), 7);
+    // Total weight should be: old(3) - old_owner_b_weight(1) + new_owner_b_weight(2) = 4.
+    assert_eq!(client.get_total_weight(), 4);
 }
 
 #[test]
@@ -2459,6 +2459,122 @@ fn change_weight_rejects_invalid_weight() {
     );
 }
 
+#[test]
+fn change_weight_rejects_zero_at_creation_and_execution() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(1);
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &owner_b,
+            &0,
+            &str(&env, "Zero is removal"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+
+    // Simulate an old or malformed stored proposal: execute must independently
+    // reject zero rather than creating a listed but non-voting owner.
+    let proposal = Proposal {
+        id: 999,
+        proposer: owner_a.clone(),
+        description: str(&env, "Malformed zero weight"),
+        deadline: DEADLINE,
+        approvals: 1,
+        status: ProposalStatus::Ready,
+        kind: ProposalKind::ChangeOwnerWeight(owner_b.clone(), 0),
+        ready_at: NOW,
+        quorum_weight: 1,
+        category: ProposalCategory::Other,
+    };
+    write_proposal(&env, &proposal);
+    assert_eq!(
+        client.try_execute(&owner_c, &999),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+    assert_eq!(client.get_total_weight(), 3);
+}
+
+#[test]
+fn change_weight_enforces_single_owner_cap_at_creation_and_execution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let mut owners = Vec::new(&env);
+    owners.push_back(a.clone());
+    owners.push_back(b.clone());
+    owners.push_back(c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(2);
+    weights.push_back(2);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &1, &0);
+
+    // 5 / 9 exceeds the default 50% cap; 4 / 8 is exactly at the cap.
+    assert_eq!(
+        client.try_create_change_weight_proposal(&a, &a, &5, &str(&env, "Over cap"), &DEADLINE),
+        Err(Ok(ContractError::SingleOwnerWeightCapExceeded))
+    );
+    let pending = client.create_change_weight_proposal(&a, &a, &4, &str(&env, "At cap"), &DEADLINE);
+
+    // Reduce B first. The pending A=4 change now yields 4 / 7, so it must fail
+    // when executed even though it was valid when created (4 / 8).
+    let reduce_b =
+        client.create_change_weight_proposal(&a, &b, &1, &str(&env, "Reduce B"), &DEADLINE);
+    client.approve(&a, &reduce_b);
+    client.execute(&c, &reduce_b);
+    client.approve(&a, &pending);
+    assert_eq!(
+        client.try_execute(&c, &pending),
+        Err(Ok(ContractError::SingleOwnerWeightCapExceeded))
+    );
+}
+
+#[test]
+fn concentrated_weight_can_authorize_sensitive_action_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    let heavy = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let mut owners = Vec::new(&env);
+    owners.push_back(heavy.clone());
+    owners.push_back(b);
+    owners.push_back(c);
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &3, &0);
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(heavy);
+    client.set_guardian(&approvers, &Address::generate(&env));
+}
+
+#[test]
+fn max_single_owner_weight_cap_is_configurable_but_never_allows_a_majority() {
+    let (env, client, owner_a, owner_b, _, _, _) = setup(2);
+    assert_eq!(client.get_max_single_owner_weight_pct(), 50);
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_b);
+    client.set_max_single_owner_weight_pct(&approvers, &40);
+    assert_eq!(client.get_max_single_owner_weight_pct(), 40);
+    assert_eq!(
+        client.try_set_max_single_owner_weight_pct(&approvers, &51),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+}
+
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
 
 proptest! {
@@ -2523,6 +2639,84 @@ proptest! {
             client.try_approve(&first, &id),
             Err(Ok(ContractError::AlreadyApproved))
         );
+    }
+
+    /// Across valid owner additions, removals, and weight changes, the cached
+    /// total must always equal the weights observable for every current owner.
+    #[test]
+    fn total_weight_matches_all_current_owner_weights(
+        operations in proptest::collection::vec((0u8..=2, 1u32..=10), 1..=20)
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let mut owners = Vec::new(&env);
+        let mut model_weights: std::vec::Vec<u32> = std::vec::Vec::new();
+        for _ in 0..3 {
+            owners.push_back(Address::generate(&env));
+            model_weights.push(1);
+        }
+        let mut initial_weights = Vec::new(&env);
+        initial_weights.push_back(1); initial_weights.push_back(1); initial_weights.push_back(1);
+        client.initialize(&owners, &initial_weights, &1, &0);
+
+        for (kind, seed) in operations {
+            let proposer = owners.get(0).unwrap();
+            match kind {
+                // Add only below MAX_OWNERS. New owners always start at weight 1.
+                0 if owners.len() < 20 => {
+                    let new_owner = Address::generate(&env);
+                    let id = client.create_add_owner_proposal(&proposer, &new_owner, &str(&env, "fuzz add"), &DEADLINE);
+                    client.approve(&proposer, &id);
+                    client.execute(&proposer, &id);
+                    owners.push_back(new_owner);
+                    model_weights.push(1);
+                }
+                // Preserve the contract's minimum owner-count constraint for a
+                // threshold of one: never remove below two owners.
+                1 if owners.len() > 2 => {
+                    let index = (seed as usize) % owners.len() as usize;
+                    let target = owners.get(index as u32).unwrap();
+                    let id = client.create_remove_owner_proposal(&proposer, &target, &str(&env, "fuzz remove"), &DEADLINE);
+                    client.approve(&proposer, &id);
+                    client.execute(&proposer, &id);
+                    let mut next_owners = Vec::new(&env);
+                    let mut next_weights = std::vec::Vec::new();
+                    for i in 0..owners.len() {
+                        if i != index as u32 {
+                            next_owners.push_back(owners.get(i).unwrap());
+                            next_weights.push(model_weights[i as usize]);
+                        }
+                    }
+                    owners = next_owners;
+                    model_weights = next_weights;
+                }
+                // Only propose weights that satisfy the configured 50% cap.
+                2 => {
+                    let index = (seed as usize) % owners.len() as usize;
+                    let new_weight = seed % 10 + 1;
+                    let total: u32 = model_weights.iter().sum();
+                    let resulting_total = total - model_weights[index] + new_weight;
+                    if new_weight * 100 <= resulting_total * 50 {
+                        let target = owners.get(index as u32).unwrap();
+                        let id = client.create_change_weight_proposal(&proposer, &target, &new_weight, &str(&env, "fuzz weight"), &DEADLINE);
+                        client.approve(&proposer, &id);
+                        client.execute(&proposer, &id);
+                        model_weights[index] = new_weight;
+                    }
+                }
+                _ => {}
+            }
+
+            let mut observed_total = 0u32;
+            for owner in owners.iter() {
+                observed_total += client.get_owner_weight(&owner);
+            }
+            prop_assert_eq!(observed_total, client.get_total_weight());
+        }
     }
 
     #[test]
