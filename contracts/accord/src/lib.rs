@@ -1021,9 +1021,10 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, true);
 
+        let weight = read_owner_weight(&env, &approver);
         proposal.approvals = proposal
             .approvals
-            .checked_add(1)
+            .checked_add(weight)
             .ok_or(ContractError::ArithmeticError)?;
 
         // Record the timestamp when the proposal first crosses the threshold.
@@ -1072,9 +1073,10 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, false);
 
+        let weight = read_owner_weight(&env, &approver);
         proposal.approvals = proposal
             .approvals
-            .checked_sub(1)
+            .checked_sub(weight)
             .ok_or(ContractError::ArithmeticError)?;
         proposal.status = derive_status(&env, &proposal);
         write_proposal(&env, &proposal);
