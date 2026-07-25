@@ -1851,6 +1851,218 @@ fn proposer_without_limit_is_unrestricted() {
     assert_eq!(id, 1);
 }
 
+// ─── Cumulative Spending Limit (issue #237) ───────────────────────────────────
+
+#[test]
+fn spending_limit_cumulative_across_multiple_proposals() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let limit: i128 = 10_000_000;
+
+    // Set a spending limit of 10M for owner_a.
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &limit,
+        &str(&env, "Set 10M limit"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    // First proposal of 6M succeeds (under 10M).
+    let id1 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 6_000_000, &token_client.address),
+        &str(&env, "First 6M"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert!(id1 > 0);
+
+    // Execute the first proposal so the 6M counts as spent.
+    client.approve(&owner_a, &id1);
+    client.approve(&owner_b, &id1);
+    client.execute(&owner_c, &id1);
+
+    // Second proposal of 5M would push cumulative to 11M > 10M → rejected.
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &Address::generate(&env), 5_000_000, &token_client.address),
+            &str(&env, "Second 5M"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::SpendingLimitExceeded))
+    );
+
+    // Third proposal of 4M succeeds (6M + 4M = 10M, exactly at the limit).
+    let id3 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 4_000_000, &token_client.address),
+        &str(&env, "Third 4M"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert!(id3 > 0);
+
+    // The remaining limit should now show 4M (not yet executed).
+    let remaining = client.get_remaining_spending_limit(&owner_a, &token_client.address);
+    assert_eq!(remaining, Some(4_000_000));
+
+    // Execute the third proposal.
+    client.approve(&owner_a, &id3);
+    client.approve(&owner_b, &id3);
+    client.execute(&owner_c, &id3);
+
+    // Remaining should now be 0.
+    let remaining = client.get_remaining_spending_limit(&owner_a, &token_client.address);
+    assert_eq!(remaining, Some(0));
+}
+
+#[test]
+fn spending_limit_cumulative_with_same_token_multi_transfer() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let limit: i128 = 10_000_000;
+
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a, &owner_a, &token_client.address, &limit,
+        &str(&env, "Set limit"), &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    // A multi-transfer proposal with two transfers of the same token — totals are aggregated.
+    let recipient1 = Address::generate(&env);
+    let recipient2 = Address::generate(&env);
+    let mut transfers = Vec::new(&env);
+    transfers.push_back(Transfer { to: recipient1, token: token_client.address.clone(), amount: 6_000_000 });
+    transfers.push_back(Transfer { to: recipient2, token: token_client.address.clone(), amount: 5_000_000 });
+    // 6M + 5M = 11M, exceeding the 10M limit.
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &transfers,
+            &str(&env, "Multi-transfer over limit"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::SpendingLimitExceeded))
+    );
+}
+
+#[test]
+fn spending_limit_different_tokens_independent() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let token_admin2 = Address::generate(&env);
+    let token_id2 = env.register_stellar_asset_contract_v2(token_admin2);
+    let token2_client = token::Client::new(&env, &token_id2.address());
+    let _token2_sac = token::StellarAssetClient::new(&env, &token_id2.address());
+
+    // Set limit on first token only.
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a, &owner_a, &token_client.address, &1_000_000,
+        &str(&env, "Limit token 1"), &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    // Spend on token 1 (900k).
+    let id1 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 900_000, &token_client.address),
+        &str(&env, "Use token 1"), &DEADLINE, &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &id1);
+    client.approve(&owner_b, &id1);
+    client.execute(&owner_c, &id1);
+
+    // Remaining on token 1: 100k.
+    assert_eq!(
+        client.get_remaining_spending_limit(&owner_a, &token_client.address),
+        Some(100_000)
+    );
+
+    // Token 2 has no limit — unrestricted.
+    assert_eq!(
+        client.get_remaining_spending_limit(&owner_a, &token2_client.address),
+        None,
+    );
+
+    // Large proposal on token 2 (unrestricted) succeeds.
+    let id2 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 999_999_999, &token2_client.address),
+        &str(&env, "Large token 2"), &DEADLINE, &ProposalCategory::Transfer,
+    );
+    assert!(id2 > 0);
+}
+
+#[test]
+fn get_remaining_spending_limit_no_limit() {
+    let (_, client, owner_a, _, _, _, token_client) = setup(2);
+    assert_eq!(
+        client.get_remaining_spending_limit(&owner_a, &token_client.address),
+        None,
+    );
+}
+
+#[test]
+fn spending_limit_window_expiry_resets_cumulative() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let limit: i128 = 10_000_000;
+
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a, &owner_a, &token_client.address, &limit,
+        &str(&env, "Set limit"), &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    // Spend 6M.
+    let id1 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 6_000_000, &token_client.address),
+        &str(&env, "Spend 6M"), &DEADLINE, &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &id1);
+    client.approve(&owner_b, &id1);
+    client.execute(&owner_c, &id1);
+
+    assert_eq!(
+        client.get_remaining_spending_limit(&owner_a, &token_client.address),
+        Some(4_000_000)
+    );
+
+    // Advance time past the spending window.
+    // SPENDING_WINDOW is 2_592_000 (30 days). We are at NOW (1_000) after execute.
+    // Setting epoch + window expiry: move past NOW + 2_592_000.
+    set_timestamp(&env, NOW + 2_592_001);
+
+    // After window expiry, the spent should reset.
+    // But first, the spend tracker epoch was set to NOW (1_000) via SetSpendingLimit execute.
+    // NOW is 1_000, NOW + SPENDING_WINDOW = 2_593_000. We advanced to 2_593_001.
+    assert_eq!(
+        client.get_remaining_spending_limit(&owner_a, &token_client.address),
+        Some(limit),
+    );
+
+    // New spending after window reset also works.
+    let far_deadline = NOW + 2_592_000 + 86_400;
+    let id2 = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 5_000_000, &token_client.address),
+        &str(&env, "New window spend"), &far_deadline, &ProposalCategory::Transfer,
+    );
+    assert!(id2 > 0);
+}
+
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
 
 proptest! {

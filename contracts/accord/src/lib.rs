@@ -44,6 +44,13 @@ pub enum ProposalKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct SpentTracker {
+    pub spent: i128,
+    pub epoch: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub enum ProposalCategory {
     Transfer,
     Payroll,
@@ -220,6 +227,10 @@ fn owner_weight_key(owner: &Address) -> (Symbol, Address) {
     (symbol_short!("OWEIGHT"), owner.clone())
 }
 
+fn spent_tracking_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
+    (symbol_short!("SPENT"), owner.clone(), token.clone())
+}
+
 // ─── TTL Constants ───────────────────────────────────────────────────────────
 
 // 518,400 ledgers ≈ 30 days at the current 5-second ledger close time.
@@ -277,6 +288,16 @@ const MAX_PROPOSAL_DURATION: u64 = 7_776_000;
 const MIN_OWNER_WEIGHT: u32 = 1;
 /// Maximum owner weight.
 const MAX_OWNER_WEIGHT: u32 = 100_000;
+
+/// Spending window: 30 days in seconds. The cumulative spent amount per (owner, token)
+/// resets when this window elapses since the first tracked spend in the window.
+/// Epoch-based window: the window clock starts ticking from the timestamp of the first
+/// spend (or when the limit was set). This is deterministic — two contracts with the
+/// same set of operations will arrive at identical window boundaries. A rolling window
+/// (sliding per-transaction) was considered but rejected because it would make the
+/// "available limit" view depend on the exact time of each prior transaction, producing
+/// non-deterministic behavior across nodes executing the same transaction sequence.
+const SPENDING_WINDOW: u64 = 2_592_000;
 
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
@@ -393,6 +414,31 @@ fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128
     let key = spending_limit_key(owner, token);
     env.storage().persistent().set(&key, &limit);
     bump_persistent(env, &key);
+}
+
+fn read_spent_tracker(env: &Env, owner: &Address, token: &Address) -> SpentTracker {
+    let key = spent_tracking_key(owner, token);
+    env.storage().persistent().get(&key).unwrap_or(SpentTracker { spent: 0, epoch: 0 })
+}
+
+fn write_spent_tracker(env: &Env, owner: &Address, token: &Address, tracker: &SpentTracker) {
+    let key = spent_tracking_key(owner, token);
+    env.storage().persistent().set(&key, tracker);
+    bump_persistent(env, &key);
+}
+
+/// Returns the amount effectively spent within the current spending window.
+/// If no window is active (epoch == 0) or the window has expired, returns 0.
+fn effective_spent(env: &Env, owner: &Address, token: &Address) -> i128 {
+    let tracker = read_spent_tracker(env, owner, token);
+    if tracker.epoch == 0 {
+        return 0;
+    }
+    let now = env.ledger().timestamp();
+    if now > tracker.epoch.saturating_add(SPENDING_WINDOW) {
+        return 0;
+    }
+    tracker.spent
 }
 
 fn read_active_count(env: &Env) -> u32 {
@@ -619,8 +665,13 @@ impl AccordContract {
                 }
             }
             for i in 0..checked_tokens.len() {
-                if let Some(limit) = read_spending_limit(&env, &proposer, &checked_tokens.get(i).unwrap()) {
-                    if checked_totals.get(i).unwrap() > limit {
+                let token = checked_tokens.get(i).unwrap();
+                if let Some(limit) = read_spending_limit(&env, &proposer, &token) {
+                    let already_spent = effective_spent(&env, &proposer, &token);
+                    let cumulative = checked_totals.get(i).unwrap()
+                        .checked_add(already_spent)
+                        .ok_or(ContractError::ArithmeticError)?;
+                    if cumulative > limit {
                         return Err(ContractError::SpendingLimitExceeded);
                     }
                 }
@@ -1145,6 +1196,46 @@ impl AccordContract {
                         return Err(ContractError::TransferFailed);
                     }
                 }
+                // Track cumulative spending per token for the proposer.
+                let proposer = proposal.proposer.clone();
+                let mut tracked_tokens: Vec<Address> = Vec::new(&env);
+                let mut tracked_amounts: Vec<i128> = Vec::new(&env);
+                for transfer in transfers.iter() {
+                    let mut found = false;
+                    for j in 0..tracked_tokens.len() {
+                        if tracked_tokens.get(j).unwrap() == transfer.token {
+                            let total = tracked_amounts.get(j).unwrap()
+                                .checked_add(transfer.amount)
+                                .ok_or(ContractError::ArithmeticError)?;
+                            tracked_amounts.set(j, total);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        tracked_tokens.push_back(transfer.token.clone());
+                        tracked_amounts.push_back(transfer.amount);
+                    }
+                }
+                let now = env.ledger().timestamp();
+                for j in 0..tracked_tokens.len() {
+                    let token = tracked_tokens.get(j).unwrap();
+                    let amount = tracked_amounts.get(j).unwrap();
+                    let tracker = read_spent_tracker(&env, &proposer, &token);
+                    let epoch = if tracker.epoch == 0 {
+                        now
+                    } else {
+                        tracker.epoch
+                    };
+                    let spent = if now > epoch.saturating_add(SPENDING_WINDOW) {
+                        amount
+                    } else {
+                        tracker.spent
+                            .checked_add(amount)
+                            .ok_or(ContractError::ArithmeticError)?
+                    };
+                    write_spent_tracker(&env, &proposer, &token, &SpentTracker { spent, epoch });
+                }
             }
             ProposalKind::AddOwner(new_owner) => {
                 let mut owners = read_owners(&env)?;
@@ -1185,6 +1276,9 @@ impl AccordContract {
             }
             ProposalKind::SetSpendingLimit(owner, token, limit) => {
                 write_spending_limit(&env, owner, token, *limit);
+                // Reset cumulative spending tracking when a new limit is set.
+                let now = env.ledger().timestamp();
+                write_spent_tracker(&env, owner, token, &SpentTracker { spent: 0, epoch: now });
             }
         }
 
@@ -1311,6 +1405,15 @@ impl AccordContract {
     /// limit is set (the owner is unrestricted for that token).
     pub fn get_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
         read_spending_limit(&env, &owner, &token)
+    }
+
+    /// Returns the remaining spending limit (limit minus cumulative spent within
+    /// the current window) for an `(owner, token)` pair. Returns `None` if no
+    /// limit is set (the owner is unrestricted for that token).
+    pub fn get_remaining_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
+        let limit = read_spending_limit(&env, &owner, &token)?;
+        let spent = effective_spent(&env, &owner, &token);
+        Some(limit.saturating_sub(spent))
     }
 
     /// Returns the current approval threshold.
