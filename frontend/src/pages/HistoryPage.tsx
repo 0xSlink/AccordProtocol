@@ -95,11 +95,46 @@ export function HistoryPage({
         p.proposer.toLowerCase().includes(proposerFilter.toLowerCase())
     );
 
+  const hasExecutedProposals = displayedProposals.some((p) => p.status === "executed");
+
+  const handleExportCSV = () => {
+    const executed = displayedProposals.filter((p) => p.status === "executed");
+    if (executed.length === 0) return;
+
+    const headers = ["ID", "Amount", "Token", "Recipient", "Date"];
+    const rows = executed.map(
+      (p) => `${p.id},"${p.amount}","${p.token}","${p.to}","${p.executedAt || p.deadline}"`
+    );
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "accord-history.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold">Proposal History</h2>
-        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded-lg">
+        <div className="flex items-center gap-3">
+          {hasExecutedProposals && (
+            <button
+              onClick={handleExportCSV}
+              className="text-xs px-3 py-1 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white rounded-md transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              Export CSV
+            </button>
+          )}
+          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded-lg">
           {TABS.map((tab) => (
             <button
               key={tab.key}
@@ -114,6 +149,7 @@ export function HistoryPage({
               {tab.label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 

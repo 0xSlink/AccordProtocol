@@ -18,6 +18,7 @@ export type Proposal = {
   proposer: string;
   userHasApproved: boolean;
   approverAddresses: string[];
+  executedAt?: string | null;
 };
 
 export type Owner = {

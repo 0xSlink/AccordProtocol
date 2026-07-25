@@ -135,6 +135,7 @@ export function mapProposal(raw: any, threshold: number): Proposal {
     proposer: shortenAddr(String(raw.proposer)),
     userHasApproved: false,
     approverAddresses: [],
+    executedAt: formatDeadline(rawDeadline),
   };
 }
 
