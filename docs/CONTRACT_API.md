@@ -40,6 +40,8 @@ Scan this table when you hit an error code and need a fast answer. Errors develo
 | 21 `InvalidDuration` | Deadline is more than 90 days from now. | Cap the deadline at ≤ 90 days ahead. |
 | 22 `InvalidRecipient` | Transfer recipient is the contract's own address. | Use an external recipient address. |
 | 28 `SpendingLimitExceeded` | Proposal amount exceeds the proposer's per-token spending limit. | Lower the amount or raise/remove the spending limit. |
+| 29 `InvalidWeight` | An owner weight is zero or outside the supported range. | Use a positive valid weight; use `RemoveOwner` rather than setting weight to zero. |
+| 31 `SingleOwnerWeightCapExceeded` | A weight change would give one owner more than the configured share of total voting weight. | Choose a lower weight or adjust the quorum-authorized cap deliberately. |
 | 23 `TimeLockActive` | Time-lock delay after reaching `Ready` has not elapsed. | Wait until `ready_at + time_lock_delay`, then execute. |
 | 26 `ContractFrozen` | Contract is frozen; create/execute paths are blocked. | Co-sign `unfreeze` with threshold owners. |
 | 27 `NoGuardian` | `freeze` called before a guardian was registered. | Call `set_guardian` first, then freeze. |
@@ -53,6 +55,19 @@ Scan this table when you hit an error code and need a fast answer. Errors develo
 | 20 `ArithmeticError` | Integer overflow/underflow guard tripped (rare). | Contact maintainers; should not occur in normal use. |
 
 ---
+
+## Owner weights and `ChangeOwnerWeight`
+
+`ChangeOwnerWeight(target_owner, new_weight)` accepts only positive weights.
+**Zero is never a valid weight**: leaving an address on the owner list with no
+meaningful vote is ambiguous, so use the `RemoveOwner` proposal flow when an
+owner must lose voting rights. The contract checks this both when the proposal
+is created and again immediately before it is executed.
+
+The resulting weight is also limited by the configurable
+`get_max_single_owner_weight_pct()` parameter (50% by default). A weighted,
+distinct-owner quorum may tighten it through
+`set_max_single_owner_weight_pct(approvers, max_pct)` (1–50 only).
 
 ## `initialize`
 
@@ -246,7 +261,7 @@ The table below maps every `ContractError` discriminant to its cause and the rec
 | 7 | `ProposalNotActive` | The proposal's derived status is `Executed`, `Expired`, or `Revoked` — any terminal state that blocks further `approve`, `revoke`, or `execute` calls. | Check the proposal status via `get_proposal` before acting. Expired proposals can only be swept via `cancel_expired`. |
 | 8 | `AlreadyApproved` | The calling owner has already cast an approval for this proposal (the approval flag in persistent storage is `true`). | Use `revoke` first to withdraw the prior approval, then re-approve if needed. |
 | 9 | `NotApproved` | `revoke` was called by an owner who has not yet approved the proposal (approval flag is `false` or absent). | Only call `revoke` after successfully calling `approve` for the same proposal. |
-| 10 | `ThresholdNotMet` | `execute` was called on a proposal whose approval count is still below the required threshold. Also raised by `set_guardian`, `unfreeze`, and `upgrade` when the `approvers` list contains fewer entries than the current threshold. | Gather the required number of owner approvals before executing. Check the current threshold via `get_threshold`. |
+| 10 | `ThresholdNotMet` | `execute` was called before the required approval weight was reached. Also raised by `set_guardian`, `unfreeze`, and `upgrade` when distinct approvers' combined weight is below the current threshold. | Gather enough owner voting weight, then retry. Check the current threshold via `get_threshold`. |
 | 11 | `ProposalExpired` | The ledger timestamp has surpassed the proposal's `deadline`. Raised by `execute` when it detects expiry; the proposal status is persisted as `Expired` and the active-proposal counter is decremented. | Create a new proposal with a fresh deadline. Use `cancel_expired` to sweep stale IDs and free the active-proposal slot. |
 | 12 | `InvalidAmount` | The `amount` field in `create_proposal` is less than **1** stroop (`MIN_AMOUNT = 1`). Negative and zero values are both rejected. | Pass a positive integer ≥ 1 in the token's smallest unit. For XLM this is stroops (1 XLM = 10,000,000 stroops). |
 | 13 | `InvalidDeadline` | The `deadline` timestamp is ≤ the current ledger timestamp at the time the proposal creation transaction is processed. | Set a deadline strictly in the future. Account for block-time variance by adding a buffer of at least a few minutes. |
@@ -263,7 +278,7 @@ The table below maps every `ContractError` discriminant to its cause and the rec
 | 24 | `WouldBreakThreshold` | `create_remove_owner_proposal` was rejected because executing the removal would leave fewer owners than the current threshold (`owners.len() <= threshold`). | Lower the threshold first via `create_change_threshold_proposal`, then remove the owner, or ensure the owner count exceeds the threshold before attempting removal. |
 | 25 | `OwnerNotFound` | The address supplied to `create_remove_owner_proposal` as `owner_to_remove` is not present in the current owner list. | Verify the address is a registered owner with `is_owner` or `get_owners` before submitting a removal proposal. |
 | 26 | `ContractFrozen` | The contract's frozen flag is `true`. `create_proposal`, `create_add_owner_proposal`, `create_remove_owner_proposal`, `create_change_threshold_proposal`, and `execute` are all blocked while frozen. | The guardian must call `freeze` (already done if this error appears). Only `unfreeze` (requiring threshold co-signers) can restore normal operation. |
-| 27 | `NoGuardian` | `freeze` was called but no guardian address has been stored in the contract (the `GUARD` storage key is absent). | Call `set_guardian` with threshold-many owner approvers to register a guardian address before attempting to freeze. |
+| 27 | `NoGuardian` | `freeze` was called but no guardian address has been stored in the contract (the `GUARD` storage key is absent). | Call `set_guardian` with distinct owner co-signers whose combined weight reaches threshold. |
 | 28 | `SpendingLimitExceeded` | The proposer's aggregate amount for a token in `create_proposal` exceeds the per-owner spending limit stored for that `(owner, token)` pair. Raised only when a limit has been set; unrestricted owners are unaffected. | Lower the proposal amount so it fits under the limit, or raise/clear the limit via the spending-limit governance path before retrying. |
 
 ---
