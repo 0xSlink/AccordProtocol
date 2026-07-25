@@ -201,6 +201,188 @@ fn initialize_rejects_threshold_above_count() {
     );
 }
 
+// ─── Absolute-weight quorum model ────────────────────────────────────────────
+
+/// The threshold is an absolute weight value, not a count of owners. Validate
+/// that initialize rejects a threshold that exceeds the sum of all owner weights
+/// even when there are enough owners to satisfy a count-based check.
+///
+/// Setup: 3 owners each with weight 2 → total_weight = 6.
+/// A threshold of 7 must be rejected because 7 > 6, even though 7 ≤ MAX_OWNERS.
+#[test]
+fn initialize_rejects_threshold_above_total_weight() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+    // Each weight = 2, total_weight = 6.
+    let mut weights = Vec::new(&env);
+    weights.push_back(2_u32);
+    weights.push_back(2_u32);
+    weights.push_back(2_u32);
+
+    // threshold 7 > total_weight 6 — must be rejected.
+    assert_eq!(
+        client.try_initialize(&owners, &weights, &7, &0),
+        Err(Ok(ContractError::InvalidThreshold))
+    );
+
+    // threshold 6 == total_weight 6 — must be accepted (unanimity).
+    client.initialize(&owners, &weights, &6, &0);
+    assert_eq!(client.get_threshold(), 6);
+}
+
+/// Adding a new owner increases total_weight but does NOT automatically change
+/// the threshold. A proposal created before the addition and one created after
+/// must both carry the same quorum_weight (the unchanged threshold), confirming
+/// the absolute-weight model is not percentage-based.
+#[test]
+fn quorum_weight_unchanged_when_owner_added() {
+    let (env, client, owner_a, owner_b, owner_c, non_owner, token_client) = setup(2);
+
+    // threshold = 2, total_weight = 3 (3 owners × weight 1).
+    assert_eq!(client.get_threshold(), 2);
+    assert_eq!(client.get_total_weight(), 3);
+
+    let id_before = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Before add"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(client.get_proposal(&id_before).quorum_weight, 2);
+
+    // Propose and execute adding non_owner as a fourth owner (weight 1).
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &non_owner,
+        &str(&env, "Add fourth owner"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_b, &add_id);
+    client.execute(&owner_c, &add_id);
+
+    // total_weight is now 4, but threshold is still 2.
+    assert_eq!(client.get_total_weight(), 4);
+    assert_eq!(client.get_threshold(), 2);
+
+    let id_after = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "After add"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    // quorum_weight must be the same on both proposals — threshold did not change.
+    assert_eq!(client.get_proposal(&id_after).quorum_weight, 2);
+    assert_eq!(
+        client.get_proposal(&id_before).quorum_weight,
+        client.get_proposal(&id_after).quorum_weight,
+    );
+}
+
+/// Removing an owner reduces total_weight. If the remaining weight would drop
+/// below the current threshold, the removal proposal must be rejected.
+/// If it stays >= threshold, it must be accepted.
+#[test]
+fn remove_owner_rejected_when_remaining_weight_below_threshold() {
+    // 3 owners: A weight 3, B weight 1, C weight 1 → total_weight = 5, threshold = 4.
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(3_u32);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+    // threshold = 4; total_weight = 5.
+    client.initialize(&owners, &weights, &4, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    // Removing owner_a (weight 3) would leave total_weight = 2, which is < threshold 4.
+    assert_eq!(
+        client.try_create_remove_owner_proposal(
+            &owner_b,
+            &owner_a,
+            &str(&env, "Remove heavy owner"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::WouldBreakThreshold))
+    );
+
+    // Removing owner_c (weight 1) would leave total_weight = 4 == threshold 4 — allowed.
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_c,
+        &str(&env, "Remove light owner"),
+        &DEADLINE,
+    );
+    assert!(remove_id > 0);
+}
+
+/// A change-threshold proposal must be rejected if the new threshold would
+/// exceed the current total_weight, and accepted when it is within range.
+#[test]
+fn change_threshold_proposal_validates_against_total_weight() {
+    // 3 owners each weight 1 → total_weight = 3, threshold = 2.
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    // Proposing a threshold of 4 > total_weight 3 must fail.
+    assert_eq!(
+        client.try_create_change_threshold_proposal(
+            &owner_a,
+            &4,
+            &str(&env, "Too high"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::InvalidThreshold))
+    );
+
+    // Proposing a threshold equal to total_weight (unanimity) must succeed.
+    let change_id = client.create_change_threshold_proposal(
+        &owner_a,
+        &3,
+        &str(&env, "Unanimity"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_b, &change_id);
+    client.execute(&owner_c, &change_id);
+    assert_eq!(client.get_threshold(), 3);
+
+    // A proposal created after the change must carry the new quorum_weight.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "After threshold change"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(client.get_proposal(&id).quorum_weight, 3);
+}
+
 #[test]
 fn initialize_rejects_duplicate_owners() {
     let env = Env::default();

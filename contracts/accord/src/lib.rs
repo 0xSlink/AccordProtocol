@@ -606,9 +606,6 @@ impl AccordContract {
         if n == 0 || n > MAX_OWNERS {
             return Err(ContractError::InvalidOwners);
         }
-        if threshold == 0 || threshold > n {
-            return Err(ContractError::InvalidThreshold);
-        }
 
         if owners.len() != weights.len() {
             return Err(ContractError::InvalidWeightsLength);
@@ -639,6 +636,16 @@ impl AccordContract {
                 .checked_add(weight)
                 .ok_or(ContractError::ArithmeticError)?;
         }
+
+        // Validate threshold against total weight, not owner count. The threshold
+        // is an absolute weight value — a proposal requires this many weight-units
+        // of approval, not this many individual owners. Validating against
+        // total_weight ensures the threshold is achievable given the current
+        // weight distribution.
+        if threshold == 0 || threshold > total_weight {
+            return Err(ContractError::InvalidThreshold);
+        }
+
         write_total_weight(&env, total_weight);
 
         let key = owners_key();
@@ -1048,7 +1055,15 @@ impl AccordContract {
             return Err(ContractError::OwnerNotFound);
         }
 
-        if owners.len() <= threshold {
+        // Guard: removing this owner must not make the threshold unachievable.
+        // With the absolute-weight model the correct check is whether the
+        // remaining total weight would still be >= threshold.
+        let removed_weight = read_owner_weight(&env, &owner_to_remove);
+        let total_weight = read_total_weight(&env);
+        let remaining_weight = total_weight
+            .checked_sub(removed_weight)
+            .ok_or(ContractError::ArithmeticError)?;
+        if remaining_weight < threshold {
             return Err(ContractError::WouldBreakThreshold);
         }
 
@@ -1121,9 +1136,12 @@ impl AccordContract {
         require_owner(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
+        let total_weight = read_total_weight(&env);
 
-        if new_threshold == 0 || new_threshold > owners.len() {
+        // The threshold is an absolute weight value. Validate it against the
+        // current total weight so the proposed threshold is always achievable
+        // given the current weight distribution.
+        if new_threshold == 0 || new_threshold > total_weight {
             return Err(ContractError::InvalidThreshold);
         }
 
