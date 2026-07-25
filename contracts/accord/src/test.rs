@@ -1885,6 +1885,62 @@ proptest! {
             Err(Ok(ContractError::AlreadyApproved))
         );
     }
+
+    #[test]
+    fn active_count_never_exceeds_max(
+        owner_count in 1u32..=5u32,
+        threshold_seed in 1u32..=5u32,
+        proposal_params in proptest::collection::vec(
+            (1i128..1_000_000_000_i128, 1u64..=7_776_000u64),
+            1..=65
+        )
+    ) {
+        let threshold = (threshold_seed - 1) % owner_count + 1;
+
+        let env = Env::default();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin);
+        let token_client = token::Client::new(&env, &token_id.address());
+        let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+        let mut owners = Vec::new(&env);
+        for _ in 0..owner_count {
+            owners.push_back(Address::generate(&env));
+        }
+        let mut weights = Vec::new(&env);
+        for _ in 0..owners.len() {
+            weights.push_back(1);
+        }
+        client.initialize(&owners, &weights, &threshold, &0);
+        token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+        let owner = owners.get(0).unwrap();
+        let mut active = 0;
+
+        for (amount, deadline_offset) in proposal_params {
+            let deadline = NOW + deadline_offset;
+            let result = client.try_create_proposal(
+                &owner,
+                &t(&env, &Address::generate(&env), amount, &token_client.address),
+                &str(&env, "fuzz test proposal"),
+                &deadline,
+                &ProposalCategory::Transfer,
+            );
+
+            if result.is_ok() {
+                active += 1;
+            } else {
+                prop_assert_eq!(result.unwrap_err().unwrap(), ContractError::TooManyActiveProposals);
+            }
+            prop_assert!(active <= 50); // MAX_ACTIVE_PROPOSALS
+        }
+    }
 }
 
 // ─── Multi-Transfer ────────────────────────────────────────────────────────────
