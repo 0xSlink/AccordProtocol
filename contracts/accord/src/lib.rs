@@ -1102,6 +1102,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: current_total,
             },
         );
 
