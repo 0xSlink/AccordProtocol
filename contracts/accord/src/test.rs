@@ -2060,3 +2060,120 @@ fn create_proposal_rejects_invalid_transfer_count() {
         &ProposalCategory::Transfer,
     ).is_ok());
 }
+
+#[test]
+fn execute_success_with_weighted_votes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Initialize with unequal weights: Owner A has weight 3, B and C have 1.
+    // Threshold (quorum weight) is 3.
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &3, &0);
+
+    // Fund the multisig contract.
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let amount: i128 = 100_000_000;
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, amount, &token_client.address),
+        &str(&env, "Weighted transfer"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Approve with Owner A (weight 3). This alone meets the quorum threshold of 3.
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+
+    let before = token_client.balance(&recipient);
+    // Execute should succeed with only 1 approver.
+    client.execute(&owner_a, &id);
+    assert_eq!(token_client.balance(&recipient) - before, amount);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
+}
+
+#[test]
+fn execute_rejected_with_insufficient_weighted_votes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Initialize with weights: Owner A has weight 1, B has 1, C has 3.
+    // Threshold (quorum weight) is 3.
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(3);
+    client.initialize(&owners, &weights, &3, &0);
+
+    // Fund the multisig contract.
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let amount: i128 = 100_000_000;
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, amount, &token_client.address),
+        &str(&env, "Insufficient weighted transfer"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Approve with Owner A (weight 1) and Owner B (weight 1).
+    // Flat approval count is 2, but cumulative weight is 2, which is less than quorum 3.
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Execute should fail with ThresholdNotMet.
+    assert_eq!(
+        client.try_execute(&owner_c, &id),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+}
+
