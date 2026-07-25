@@ -1749,6 +1749,20 @@ impl AccordContract {
         Ok(proposal)
     }
 
+    /// Returns current approval progress for a proposal in one call.
+    ///
+    /// `approval_weight` is the current cumulative approval weight for the proposal.
+    /// `quorum_weight` is the snapshotted required approval weight stored on the proposal.
+    /// `total_weight` is the current total owner weight in the contract.
+    pub fn get_proposal_approval_progress(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<(u32, u32, u32), ContractError> {
+        let proposal = read_proposal(&env, proposal_id)?;
+        let total_weight = read_total_weight(&env);
+        Ok((proposal.approvals, proposal.threshold, total_weight))
+    }
+
     /// Returns a page of proposals. `offset` is a 0-based index; `limit` is capped at 20.
     pub fn get_proposals_paged(env: Env, offset: u64, mut limit: u32) -> Vec<Proposal> {
         if limit > 20 {
