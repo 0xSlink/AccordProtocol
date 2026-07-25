@@ -2459,6 +2459,187 @@ fn change_weight_rejects_invalid_weight() {
     );
 }
 
+// ─── Change Owner Weight: Non-owner Rejection (issue #317) ─────────────────────
+
+#[test]
+fn change_weight_proposal_rejects_non_owner_and_leaves_state_unchanged() {
+    let (env, client, owner_a, owner_b, _, non_owner, _) = setup(2);
+
+    assert_eq!(client.get_total_proposals(), 0);
+
+    assert_eq!(
+        client.try_create_change_weight_proposal(
+            &owner_a,
+            &non_owner,
+            &5,
+            &str(&env, "Change non-owner weight"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::OwnerNotFound))
+    );
+
+    assert_eq!(client.get_total_proposals(), 0);
+
+    let id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_b,
+        &5,
+        &str(&env, "Change owner_b weight to 5"),
+        &DEADLINE,
+    );
+    assert!(id > 0);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    assert_eq!(client.get_total_proposals(), 1);
+}
+
+// ─── Approval Progress (issue #316) ───────────────────────────────────────────
+
+#[test]
+fn approval_progress_reflects_each_stage_of_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(2);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &4, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Progress test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress.approval_weight, 0);
+    assert_eq!(progress.quorum_weight, 4);
+    assert_eq!(progress.total_weight, 6);
+
+    client.approve(&owner_b, &id);
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress.approval_weight, 2);
+    assert_eq!(progress.quorum_weight, 4);
+    assert_eq!(progress.total_weight, 6);
+
+    client.approve(&owner_a, &id);
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress.approval_weight, 5);
+    assert_eq!(progress.quorum_weight, 4);
+    assert_eq!(progress.total_weight, 6);
+
+    client.revoke(&owner_b, &id);
+    let progress = client.get_proposal_approval_progress(&id);
+    assert_eq!(progress.approval_weight, 3);
+    assert_eq!(progress.quorum_weight, 4);
+    assert_eq!(progress.total_weight, 6);
+}
+
+// ─── Equal Weight Flat Regression (issue #314) ────────────────────────────────
+
+#[test]
+fn equal_weight_all_owners_matches_flat_threshold_semantics() {
+    let configs: &[(u32, u32)] = &[
+        (1, 1),
+        (2, 1),
+        (2, 2),
+        (3, 2),
+        (5, 3),
+        (12, 5),
+    ];
+
+    for &(owner_count, threshold) in configs {
+        let env = Env::default();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_client = token::Client::new(&env, &token_id.address());
+        let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let mut owners = Vec::new(&env);
+        for _ in 0..owner_count {
+            owners.push_back(Address::generate(&env));
+        }
+        let mut weights = Vec::new(&env);
+        for _ in 0..owner_count {
+            weights.push_back(1);
+        }
+        client.initialize(&owners, &weights, &threshold, &0);
+        token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+        let id = client.create_proposal(
+            &owners.get(0).unwrap(),
+            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &str(&env, "Equal weight test"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+        assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+        for i in 0..threshold - 1 {
+            client.approve(&owners.get(i).unwrap(), &id);
+        }
+        assert_eq!(
+            client.get_proposal(&id).status,
+            ProposalStatus::Pending,
+            "With {} owners, threshold {} should still be Pending after {} approvals",
+            owner_count,
+            threshold,
+            threshold - 1
+        );
+
+        client.approve(&owners.get(threshold - 1).unwrap(), &id);
+        assert_eq!(
+            client.get_proposal(&id).status,
+            ProposalStatus::Ready,
+            "With {} owners, threshold {} should be Ready after {} approvals",
+            owner_count,
+            threshold,
+            threshold
+        );
+
+        client.revoke(&owners.get(0).unwrap(), &id);
+        assert_eq!(
+            client.get_proposal(&id).status,
+            ProposalStatus::Pending,
+            "Revoking one approval should drop back to Pending"
+        );
+
+        client.approve(&owners.get(0).unwrap(), &id);
+        assert_eq!(
+            client.get_proposal(&id).status,
+            ProposalStatus::Ready,
+            "Re-approving should reach Ready again"
+        );
+    }
+}
+
 // ─── Property Tests (issue #55) ─────────────────────────────────────────────────
 
 proptest! {
@@ -2578,6 +2759,75 @@ proptest! {
                 prop_assert_eq!(result.unwrap_err().unwrap(), ContractError::TooManyActiveProposals);
             }
             prop_assert!(active <= 50); // MAX_ACTIVE_PROPOSALS
+        }
+    }
+
+    #[test]
+    fn approval_weight_always_equals_sum_of_approved_weights(
+        owner_weights in proptest::collection::vec(1u32..=100u32, 2..=20),
+        threshold_seed in 1u32..=20u32,
+        actions in proptest::collection::vec(
+            (proptest::bool::weighted(0.5), 0usize..20usize),
+            10..=40
+        ),
+    ) {
+        let owner_count = owner_weights.len() as u32;
+        let threshold = ((threshold_seed - 1) % owner_count) + 1;
+
+        let env = Env::default();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin);
+        let token_client = token::Client::new(&env, &token_id.address());
+        let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+        let mut owners = Vec::new(&env);
+        for _ in 0..owner_count {
+            owners.push_back(Address::generate(&env));
+        }
+        let mut weights = Vec::new(&env);
+        for w in &owner_weights {
+            weights.push_back(*w);
+        }
+        client.initialize(&owners, &weights, &threshold, &0);
+        token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+        let id = client.create_proposal(
+            &owners.get(0).unwrap(),
+            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &str(&env, "fuzz proposal"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+
+        let mut approved = std::vec![false; owner_count as usize];
+        let mut expected_approval_weight: u32 = 0;
+
+        for (do_approve, raw_idx) in actions {
+            let idx = raw_idx % owner_count as usize;
+            let owner = owners.get(idx as u32).unwrap();
+
+            if do_approve && !approved[idx] {
+                client.approve(&owner, &id);
+                approved[idx] = true;
+                expected_approval_weight = expected_approval_weight
+                    .checked_add(owner_weights[idx])
+                    .unwrap();
+            } else if !do_approve && approved[idx] {
+                client.revoke(&owner, &id);
+                approved[idx] = false;
+                expected_approval_weight = expected_approval_weight
+                    .checked_sub(owner_weights[idx])
+                    .unwrap();
+            }
+
+            let proposal = client.get_proposal(&id);
+            prop_assert_eq!(proposal.approvals, expected_approval_weight);
         }
     }
 }
