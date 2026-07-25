@@ -2488,7 +2488,9 @@ fn change_weight_rejects_zero_at_creation_and_execution() {
         quorum_weight: 1,
         category: ProposalCategory::Other,
     };
-    write_proposal(&env, &proposal);
+    env.as_contract(&client.address, || {
+        write_proposal(&env, &proposal);
+    });
     assert_eq!(
         client.try_execute(&owner_c, &999),
         Err(Ok(ContractError::InvalidWeight))
@@ -2824,6 +2826,64 @@ proptest! {
                 prop_assert_eq!(result.unwrap_err().unwrap(), ContractError::TooManyActiveProposals);
             }
             prop_assert!(active <= 50); // MAX_ACTIVE_PROPOSALS
+        }
+    }
+
+    #[test]
+    fn proposal_approval_weight_never_exceeds_total_weight(
+        owner_count in 1u32..=8u32,
+        threshold_seed in 1u32..=8u32,
+        weights_gen in proptest::collection::vec(1u32..=100_000u32, 8),
+        actions in proptest::collection::vec((0usize..8usize, any::<bool>()), 1..=30)
+    ) {
+        let threshold = (threshold_seed - 1) % owner_count + 1;
+
+        let env = Env::default();
+        env.budget().reset_unlimited();
+        env.mock_all_auths();
+        set_timestamp(&env, NOW);
+
+        let contract_id = env.register(AccordContract, ());
+        let client = AccordContractClient::new(&env, &contract_id);
+
+        let token_admin = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(token_admin);
+        let token_client = token::Client::new(&env, &token_id.address());
+        let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+        let mut owners = Vec::new(&env);
+        for _ in 0..owner_count {
+            owners.push_back(Address::generate(&env));
+        }
+        let mut weights = Vec::new(&env);
+        for i in 0..owner_count {
+            weights.push_back(weights_gen[i as usize]);
+        }
+        client.initialize(&owners, &weights, &threshold, &0);
+        token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+        let total_weight = client.get_total_weight();
+
+        let id = client.create_proposal(
+            &owners.get(0).unwrap(),
+            &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+            &str(&env, "weight bound test proposal"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+
+        for (idx, is_approve) in actions {
+            let owner_idx = (idx % (owner_count as usize)) as u32;
+            let owner = owners.get(owner_idx).unwrap();
+            
+            if is_approve {
+                let _ = client.try_approve(&owner, &id);
+            } else {
+                let _ = client.try_revoke(&owner, &id);
+            }
+            
+            let proposal = client.get_proposal(&id);
+            prop_assert!(proposal.approvals <= total_weight);
         }
     }
 }
@@ -3680,12 +3740,12 @@ fn changing_weight_does_not_affect_spending_limit() {
         Some(5000)
     );
 
-    // Now change owner_a's weight to 10
+    // Now change owner_a's weight to 2
     let weight_id = client.create_change_weight_proposal(
         &owner_b,
         &owner_a,
-        &10,
-        &str(&env, "Weight A to 10"),
+        &2,
+        &str(&env, "Weight A to 2"),
         &(env.ledger().timestamp() + 1000),
     );
     client.approve(&owner_a, &weight_id);
