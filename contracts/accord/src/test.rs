@@ -1426,6 +1426,121 @@ fn get_approvers_rejects_unknown_proposal() {
     );
 }
 
+// ─── Weighted has_approved / get_approvers ─────────────────────
+
+#[test]
+fn has_approved_and_get_approvers_weight_independent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=1. Threshold = 5 (lowest weight that alone meets quorum).
+    // Only owner_c (weight 1) approves — has_approved and get_approvers must
+    // reflect owner_c as approved and owner_a as not, regardless of weight.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &5, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Weight independence"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Only the low-weight owner (C, weight 1) approves.
+    client.approve(&owner_c, &id);
+
+    // has_approved must be true for owner_c and false for others.
+    assert!(client.has_approved(&id, &owner_c));
+    assert!(!client.has_approved(&id, &owner_a));
+    assert!(!client.has_approved(&id, &owner_b));
+
+    // get_approvers must contain only owner_c — weight must not influence the set.
+    let approvers = client.get_approvers(&id);
+    assert_eq!(approvers.len(), 1);
+    assert!(approvers.contains(&owner_c));
+    assert!(!approvers.contains(&owner_a));
+    assert!(!approvers.contains(&owner_b));
+}
+
+#[test]
+fn has_approved_and_get_approvers_revoke_weight_independent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=100 (very high), B=1, C=1. Threshold = 100.
+    // Owner A (highest weight) approves then revokes — the binary flag must
+    // flip correctly regardless of A's weight.
+    let mut weights = Vec::new(&env);
+    weights.push_back(100);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &100, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Revoke weight independence"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve — binary flag must be set.
+    client.approve(&owner_a, &id);
+    assert!(client.has_approved(&id, &owner_a));
+    let approvers_after_approve = client.get_approvers(&id);
+    assert!(approvers_after_approve.contains(&owner_a));
+
+    // Revoke — binary flag must be cleared, regardless of weight.
+    client.revoke(&owner_a, &id);
+    assert!(!client.has_approved(&id, &owner_a));
+    let approvers_after_revoke = client.get_approvers(&id);
+    assert!(!approvers_after_revoke.contains(&owner_a));
+}
+
 // ─── Upgrade ─────────────────────────────────────────────────────────────────
 
 #[test]
