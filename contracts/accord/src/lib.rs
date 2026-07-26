@@ -224,6 +224,7 @@ pub enum ContractError {
     InvalidWeight = 29,
     InvalidWeightsLength = 30,
     SingleOwnerWeightCapExceeded = 31,
+    TargetOwnerNoLongerExists = 32,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -1553,7 +1554,9 @@ impl AccordContract {
                     return Err(ContractError::InvalidWeight);
                 }
                 let mut owners = read_owners_map(&env)?;
-                let old_weight = owners.get(target_owner.clone()).ok_or(ContractError::OwnerNotFound)?;
+                let old_weight = owners
+                    .get(target_owner.clone())
+                    .ok_or(ContractError::TargetOwnerNoLongerExists)?;
                 let current_total = read_total_weight(&env);
                 let new_total = current_total
                     .checked_sub(old_weight)

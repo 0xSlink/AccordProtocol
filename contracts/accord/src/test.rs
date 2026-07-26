@@ -110,6 +110,49 @@ fn setup_with_timelock(
     )
 }
 
+/// Sets up an env with 3 owners whose weights can differ, plus a funded token.
+fn setup_three_owner_weighted(
+    weights: [u32; 3],
+    threshold: u32,
+) -> (
+    Env,
+    AccordContractClient<'static>,
+    Address,
+    Address,
+    Address,
+    token::Client<'static>,
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    let mut weight_vec = Vec::new(&env);
+    for weight in weights.iter() {
+        weight_vec.push_back(*weight);
+    }
+    client.initialize(&owners, &weight_vec, &threshold, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    (env, client, owner_a, owner_b, owner_c, token_client)
+}
+
 // ─── Initialization ──────────────────────────────────────────────────────────
 
 #[test]
@@ -340,6 +383,91 @@ fn remove_owner_rejected_when_remaining_weight_below_threshold() {
         &DEADLINE,
     );
     assert!(remove_id > 0);
+}
+
+#[test]
+fn remove_heaviest_owner_keeps_other_pending_proposals_reachable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let owner_d = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    owners.push_back(owner_d.clone());
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(8_u32);
+    weights.push_back(2_u32);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+    client.initialize(&owners, &weights, &4, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    assert_eq!(client.get_total_weight(), 12);
+
+    let recipient_1 = Address::generate(&env);
+    let recipient_2 = Address::generate(&env);
+
+    let pending_1 = client.create_proposal(
+        &owner_b,
+        &t(&env, &recipient_1, 1_000_000, &token_client.address),
+        &str(&env, "Pending transfer one"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let pending_2 = client.create_proposal(
+        &owner_c,
+        &t(&env, &recipient_2, 1_000_000, &token_client.address),
+        &str(&env, "Pending transfer two"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
+    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
+
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_b,
+        &owner_a,
+        &str(&env, "Remove heaviest owner"),
+        &DEADLINE,
+    );
+    client.approve(&owner_b, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.approve(&owner_d, &remove_id);
+    client.execute(&owner_d, &remove_id);
+
+    assert_eq!(client.get_total_weight(), 4);
+    assert_eq!(client.get_proposal(&remove_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
+    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
+
+    client.approve(&owner_b, &pending_1);
+    client.approve(&owner_c, &pending_1);
+    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
+    client.approve(&owner_d, &pending_1);
+    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Ready);
+
+    client.approve(&owner_b, &pending_2);
+    client.approve(&owner_c, &pending_2);
+    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
+    client.approve(&owner_d, &pending_2);
+    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Ready);
 }
 
 /// A change-threshold proposal must be rejected if the new threshold would
@@ -2696,6 +2824,181 @@ fn change_weight_with_active_proposals_passes_invariant_check() {
         client.get_proposal(&transfer_id).status,
         ProposalStatus::Ready
     );
+}
+
+#[test]
+fn change_weight_second_execute_uses_current_weight_in_both_orders() {
+    let run_order = |first_new_weight: u32,
+                     second_new_weight: u32,
+                     expected_first_total: u32,
+                     expected_final_total: u32| {
+        let (env, client, owner_a, owner_b, owner_c, _token_client) =
+            setup_three_owner_weighted([4, 2, 2], 5);
+
+        assert_eq!(client.get_total_weight(), 8);
+
+        let first_id = client.create_change_weight_proposal(
+            &owner_a,
+            &owner_b,
+            &first_new_weight,
+            &str(&env, "First weight change"),
+            &DEADLINE,
+        );
+        let second_id = client.create_change_weight_proposal(
+            &owner_c,
+            &owner_b,
+            &second_new_weight,
+            &str(&env, "Second weight change"),
+            &DEADLINE,
+        );
+
+        client.approve(&owner_a, &first_id);
+        client.approve(&owner_c, &first_id);
+        client.approve(&owner_a, &second_id);
+        client.approve(&owner_c, &second_id);
+
+        assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Ready);
+        assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
+
+        client.execute(&owner_a, &first_id);
+        assert_eq!(client.get_owner_weight(&owner_b).unwrap(), first_new_weight);
+        assert_eq!(client.get_total_weight(), expected_first_total);
+        assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Executed);
+        assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
+
+        client.execute(&owner_c, &second_id);
+        assert_eq!(client.get_owner_weight(&owner_b).unwrap(), second_new_weight);
+        assert_eq!(client.get_total_weight(), expected_final_total);
+        assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Executed);
+    };
+
+    run_order(3, 4, 9, 10);
+    run_order(4, 3, 10, 9);
+}
+
+#[test]
+fn change_weight_fails_after_target_owner_is_removed_but_reverse_order_still_works() {
+    let (env, client, owner_a, owner_b, owner_c, _) = setup_three_owner_weighted([4, 2, 2], 5);
+
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove target owner"),
+        &DEADLINE,
+    );
+    let change_id = client.create_change_weight_proposal(
+        &owner_c,
+        &owner_b,
+        &5,
+        &str(&env, "Change target owner weight"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_c, &change_id);
+
+    client.execute(&owner_a, &remove_id);
+    assert_eq!(client.get_total_weight(), 6);
+    assert_eq!(client.try_get_owner_weight(&owner_b), Err(Ok(ContractError::OwnerNotFound)));
+    assert_eq!(
+        client.try_execute(&owner_c, &change_id),
+        Err(Ok(ContractError::TargetOwnerNoLongerExists))
+    );
+    assert_eq!(client.get_total_weight(), 6);
+    assert_eq!(client.get_proposal(&change_id).status, ProposalStatus::Ready);
+
+    let (env, client, owner_a, owner_b, owner_c, _) = setup_three_owner_weighted([4, 2, 2], 5);
+
+    let change_id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_b,
+        &5,
+        &str(&env, "Change target owner weight first"),
+        &DEADLINE,
+    );
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_c,
+        &owner_b,
+        &str(&env, "Remove target owner second"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_c, &change_id);
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+
+    client.execute(&owner_a, &change_id);
+    assert_eq!(client.get_owner_weight(&owner_b).unwrap(), 5);
+    assert_eq!(client.get_total_weight(), 11);
+    assert_eq!(client.get_proposal(&change_id).status, ProposalStatus::Executed);
+
+    client.execute(&owner_c, &remove_id);
+    assert_eq!(client.get_total_weight(), 6);
+    assert_eq!(client.try_get_owner_weight(&owner_b), Err(Ok(ContractError::OwnerNotFound)));
+    assert_eq!(client.get_proposal(&remove_id).status, ProposalStatus::Executed);
+}
+
+#[test]
+fn weighted_single_owner_full_lifecycle_and_reapproval_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let sole_owner = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(sole_owner.clone());
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(7_u32);
+    client.initialize(&owners, &weights, &7, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    assert_eq!(client.get_total_weight(), 7);
+
+    let first_id = client.create_proposal(
+        &sole_owner,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Single owner full lifecycle"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Pending);
+
+    client.approve(&sole_owner, &first_id);
+    assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Ready);
+    client.execute(&sole_owner, &first_id);
+    assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Executed);
+
+    let second_id = client.create_proposal(
+        &sole_owner,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Single owner revoke cycle"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&sole_owner, &second_id);
+    assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
+
+    client.revoke(&sole_owner, &second_id);
+    assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Pending);
+
+    client.approve(&sole_owner, &second_id);
+    assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
+    client.execute(&sole_owner, &second_id);
+    assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Executed);
 }
 
 #[test]
