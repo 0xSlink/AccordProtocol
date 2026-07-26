@@ -1516,6 +1516,151 @@ fn upgrade_emits_event() {
     assert_eq!(event.new_wasm_hash, dummy_hash);
 }
 
+// ─── Weighted Co-Signer Validation ────────────────────────────────────────────
+
+fn setup_weighted_owners() -> (Env, AccordContractClient<'static>, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let owner_d = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    // Weights: A=7, B=5, C=3, D=1. Total = 16.
+    // Threshold = 10 (weight quorum).
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    owners.push_back(owner_d.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(7);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &10, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    (env, client, owner_a, owner_b, owner_c, owner_d)
+}
+
+// ─── set_guardian ─────────────────────────────────────────────────────────────
+
+#[test]
+fn set_guardian_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // A (7) + C (3) = 10 >= threshold 10 — only 2 signers for a threshold of 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_c);
+    client.set_guardian(&approvers, &guardian);
+
+    assert_eq!(client.get_guardian(), Some(guardian));
+}
+
+#[test]
+fn set_guardian_weight_insufficient_fails() {
+    let (env, client, owner_a, _, _, owner_d) = setup_weighted_owners();
+
+    // A (7) + D (1) = 8 < threshold 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_d);
+    assert_eq!(
+        client.try_set_guardian(&approvers, &Address::generate(&env)),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+}
+
+// ─── unfreeze ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn unfreeze_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // Set guardian with A + C (weight 10 >= 10).
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_c.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    // Freeze via guardian.
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    // Unfreeze with A + C (weight 10 >= 10).
+    client.unfreeze(&approvers);
+    assert!(!client.is_frozen());
+}
+
+#[test]
+fn unfreeze_weight_insufficient_fails() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // Set guardian with A + C (weight 10 >= 10).
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_c.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    // Freeze via guardian.
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    // Unfreeze with A alone (weight 7 < 10) — should fail.
+    let mut insufficient = Vec::new(&env);
+    insufficient.push_back(owner_a);
+    assert_eq!(
+        client.try_unfreeze(&insufficient),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+    assert!(client.is_frozen());
+}
+
+// ─── upgrade ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn upgrade_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let dummy_hash: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+
+    // A (7) + C (3) = 10 >= threshold 10 — only 2 signers for a threshold of 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_c);
+    // Should not return a ContractError for the weight check.
+    let result = client.try_upgrade(&approvers, &dummy_hash);
+    assert_ne!(result, Err(Ok(ContractError::ThresholdNotMet)));
+}
+
+#[test]
+fn upgrade_weight_insufficient_fails() {
+    let (env, client, owner_a, _, _, owner_d) = setup_weighted_owners();
+    let dummy_hash: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+
+    // A (7) + D (1) = 8 < threshold 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_d);
+    assert_eq!(
+        client.try_upgrade(&approvers, &dummy_hash),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+}
+
 // ─── Active Count ─────────────────────────────────────────────────────────────
 
 #[test]

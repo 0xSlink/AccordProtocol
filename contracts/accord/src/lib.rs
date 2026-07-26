@@ -1362,10 +1362,6 @@ impl AccordContract {
     ) -> Result<(), ContractError> {
         let threshold = read_threshold(&env)?;
 
-        if approvers.len() < threshold {
-            return Err(ContractError::ThresholdNotMet);
-        }
-
         for i in 0..approvers.len() {
             for j in (i + 1)..approvers.len() {
                 if approvers.get(i).unwrap() == approvers.get(j).unwrap() {
@@ -1374,9 +1370,17 @@ impl AccordContract {
             }
         }
 
+        let mut cumulative_weight: u32 = 0;
         for approver in approvers.iter() {
             approver.require_auth();
             require_owner(&env, &approver)?;
+            let weight = read_owner_weight(&env, &approver);
+            cumulative_weight = cumulative_weight
+                .checked_add(weight)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+        if cumulative_weight < threshold {
+            return Err(ContractError::ThresholdNotMet);
         }
 
         write_guardian(&env, &new_guardian);
@@ -1415,10 +1419,6 @@ impl AccordContract {
     pub fn unfreeze(env: Env, approvers: Vec<Address>) -> Result<(), ContractError> {
         let threshold = read_threshold(&env)?;
 
-        if approvers.len() < threshold {
-            return Err(ContractError::ThresholdNotMet);
-        }
-
         for i in 0..approvers.len() {
             for j in (i + 1)..approvers.len() {
                 if approvers.get(i).unwrap() == approvers.get(j).unwrap() {
@@ -1427,9 +1427,17 @@ impl AccordContract {
             }
         }
 
+        let mut cumulative_weight: u32 = 0;
         for approver in approvers.iter() {
             approver.require_auth();
             require_owner(&env, &approver)?;
+            let weight = read_owner_weight(&env, &approver);
+            cumulative_weight = cumulative_weight
+                .checked_add(weight)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+        if cumulative_weight < threshold {
+            return Err(ContractError::ThresholdNotMet);
         }
 
         write_frozen(&env, false);
@@ -1471,11 +1479,6 @@ impl AccordContract {
     ) -> Result<(), ContractError> {
         let threshold = read_threshold(&env)?;
 
-        // Must have at least `threshold` approvers.
-        if approvers.len() < threshold {
-            return Err(ContractError::ThresholdNotMet);
-        }
-
         // Check for duplicate addresses before requiring auth.
         for i in 0..approvers.len() {
             for j in (i + 1)..approvers.len() {
@@ -1485,10 +1488,18 @@ impl AccordContract {
             }
         }
 
-        // Require auth from every approver and verify each is an owner.
+        // Require auth from every approver, verify each is an owner, and sum their weights.
+        let mut cumulative_weight: u32 = 0;
         for approver in approvers.iter() {
             approver.require_auth();
             require_owner(&env, &approver)?;
+            let weight = read_owner_weight(&env, &approver);
+            cumulative_weight = cumulative_weight
+                .checked_add(weight)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+        if cumulative_weight < threshold {
+            return Err(ContractError::ThresholdNotMet);
         }
 
         let caller = approvers.get(0).unwrap();
