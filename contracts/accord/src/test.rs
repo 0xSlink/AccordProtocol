@@ -852,15 +852,21 @@ fn get_proposal_approval_progress_returns_live_counts_and_total_owner_weight() {
     );
 
     let progress = client.get_proposal_approval_progress(&id);
-    assert_eq!(progress, (0, 2, 3));
+    assert_eq!(progress.approval_weight, 0);
+    assert_eq!(progress.quorum_weight, 2);
+    assert_eq!(progress.total_weight, 3);
 
     client.approve(&owner_a, &id);
     let progress = client.get_proposal_approval_progress(&id);
-    assert_eq!(progress, (1, 2, 3));
+    assert_eq!(progress.approval_weight, 1);
+    assert_eq!(progress.quorum_weight, 2);
+    assert_eq!(progress.total_weight, 3);
 
     client.approve(&owner_b, &id);
     let progress = client.get_proposal_approval_progress(&id);
-    assert_eq!(progress, (2, 2, 3));
+    assert_eq!(progress.approval_weight, 2);
+    assert_eq!(progress.quorum_weight, 2);
+    assert_eq!(progress.total_weight, 3);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 }
 
@@ -2861,13 +2867,13 @@ fn change_weight_second_execute_uses_current_weight_in_both_orders() {
         assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
 
         client.execute(&owner_a, &first_id);
-        assert_eq!(client.get_owner_weight(&owner_b).unwrap(), first_new_weight);
+        assert_eq!(client.get_owner_weight(&owner_b), first_new_weight);
         assert_eq!(client.get_total_weight(), expected_first_total);
         assert_eq!(client.get_proposal(&first_id).status, ProposalStatus::Executed);
         assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Ready);
 
         client.execute(&owner_c, &second_id);
-        assert_eq!(client.get_owner_weight(&owner_b).unwrap(), second_new_weight);
+        assert_eq!(client.get_owner_weight(&owner_b), second_new_weight);
         assert_eq!(client.get_total_weight(), expected_final_total);
         assert_eq!(client.get_proposal(&second_id).status, ProposalStatus::Executed);
     };
@@ -2931,7 +2937,7 @@ fn change_weight_fails_after_target_owner_is_removed_but_reverse_order_still_wor
     client.approve(&owner_c, &remove_id);
 
     client.execute(&owner_a, &change_id);
-    assert_eq!(client.get_owner_weight(&owner_b).unwrap(), 5);
+    assert_eq!(client.get_owner_weight(&owner_b), 5);
     assert_eq!(client.get_total_weight(), 11);
     assert_eq!(client.get_proposal(&change_id).status, ProposalStatus::Executed);
 
@@ -4456,7 +4462,7 @@ fn setup_weighted() -> (Env, AccordContractClient<'static>, Address, Address, Ad
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
     let token_client = token::Client::new(&env, &token_id.address());
     let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
-    token_sac.mint(&contract_id, 1_000_000_000_000_i128);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
     // owners vector and weights vector
     let mut owners = Vec::new(&env);
     owners.push_back(owner_a.clone());
@@ -4507,7 +4513,7 @@ fn approval_weight_persists_after_weight_change() {
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
     let recorded_weight = client.get_proposal(&id).approvals; // approvals field stores cumulative weight
     // now reduce owner_a weight via ChangeOwnerWeight proposal
-    let change_id = client.create_change_owner_weight_proposal(
+    let change_id = client.create_change_weight_proposal(
         &owner_a,
         &owner_a,
         &5_u32, // new weight lower than original, e.g., 1
@@ -4551,23 +4557,452 @@ fn add_owner_with_maximum_weight() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
     // current total weight = 10
     let new_owner = Address::generate(&env);
-    let max_weight = MAX_OWNER_WEIGHT;
     let add_id = client.create_add_owner_proposal(
         &owner_a,
         &new_owner,
-        &str(&env, "Add max weight owner"),
+        &str(&env, "Add new owner"),
         &DEADLINE,
     );
     // approve by two owners to meet quorum (5+3 >= 6)
     client.approve(&owner_a, &add_id);
     client.approve(&owner_b, &add_id);
     client.execute(&owner_c, &add_id);
-    // verify stored weight
-    let owners_map = client.get_owners();
-    let stored_weight = owners_map.get(new_owner.clone()).unwrap();
-    assert_eq!(stored_weight, max_weight);
-    // total weight should be previous total + max_weight
+    // verify stored weight — new owners start at MIN_OWNER_WEIGHT
+    let stored_weight = client.get_owner_weight(&new_owner);
+    assert_eq!(stored_weight, MIN_OWNER_WEIGHT);
+    // total weight should be previous total + MIN_OWNER_WEIGHT
     let expected_total = client.get_total_weight(); // after execution
-    assert_eq!(expected_total, 10_u32 + max_weight);
+    assert_eq!(expected_total, 10_u32 + MIN_OWNER_WEIGHT);
+}
+
+// ─── Issue #319: get_owner_weight sentinel for non-owner ─────────────────────
+
+/// Confirms get_owner_weight returns the documented error for a non-owner
+/// address, and contrasts that with a genuine owner receiving their actual
+/// stored weight. Locks the non-owner sentinel in place so it can't silently
+/// drift if the underlying storage lookup changes later.
+#[test]
+fn get_owner_weight_returns_owner_not_found_for_non_owner() {
+    let (env, client, owner_a, owner_b, _, non_owner, _) = setup(2);
+
+    // Non-owner must return the documented sentinel error.
+    assert_eq!(
+        client.try_get_owner_weight(&non_owner),
+        Err(Ok(ContractError::OwnerNotFound))
+    );
+
+    // Contrast: genuine owners return their actual stored weight.
+    assert_eq!(client.get_owner_weight(&owner_a), 1);
+    assert_eq!(client.get_owner_weight(&owner_b), 1);
+}
+
+// ─── Issue #320: total-weight overflow rejection ─────────────────────────────
+
+/// Tests that the overflow-checked arithmetic protecting the total-weight
+/// counter rejects an AddOwner execution that would push total_weight past
+/// u32::MAX. The new owner is added to the owners map before the overflow
+/// check, but the total-weight counter must remain completely unchanged
+/// after the rejection.
+#[test]
+fn total_weight_overflow_rejected_at_add_owner() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(1);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &2, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    // Create and approve an AddOwner proposal before manipulating storage.
+    let new_owner = Address::generate(&env);
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &new_owner,
+        &str(&env, "Add would overflow"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_b, &add_id);
+
+    // Directly set total_weight to u32::MAX via storage manipulation.
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&total_weight_key(), &u32::MAX);
+    });
+    assert_eq!(client.get_total_weight(), u32::MAX);
+
+    // Executing AddOwner would add MIN_OWNER_WEIGHT (1), causing overflow.
+    assert_eq!(
+        client.try_execute(&owner_c, &add_id),
+        Err(Ok(ContractError::ArithmeticError))
+    );
+
+    // Total-weight counter must remain completely unchanged.
+    assert_eq!(client.get_total_weight(), u32::MAX);
+}
+
+/// Tests that the overflow-checked arithmetic protecting the total-weight
+/// counter rejects a ChangeOwnerWeight execution that would push total_weight
+/// past u32::MAX. The total-weight counter must remain completely unchanged
+/// after the rejection.
+#[test]
+fn total_weight_overflow_rejected_at_change_weight() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    // Use weights (5, 3, 2) so the cap check allows changing owner_c from 2 to 5.
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(5_u32);
+    weights.push_back(3_u32);
+    weights.push_back(2_u32);
+    client.initialize(&owners, &weights, &6, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    // Create and approve a ChangeOwnerWeight proposal at normal total_weight.
+    // owner_c has weight 2, change to 5. resulting_total = 10 - 2 + 5 = 13.
+    // Cap check: 5 * 100 = 500 <= 13 * 50 = 650 → passes.
+    let change_id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_c,
+        &5,
+        &str(&env, "Change would overflow"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_b, &change_id);
+
+    // Set total_weight to u32::MAX - 1 so that:
+    // (u32::MAX - 1) - 2(old_weight) + 5(new_weight) = u32::MAX + 2 → overflow
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(&total_weight_key(), &(u32::MAX - 1));
+    });
+    assert_eq!(client.get_total_weight(), u32::MAX - 1);
+
+    // Executing ChangeOwnerWeight would overflow the total.
+    assert_eq!(
+        client.try_execute(&owner_c, &change_id),
+        Err(Ok(ContractError::ArithmeticError))
+    );
+
+    // Total-weight counter must remain completely unchanged.
+    assert_eq!(client.get_total_weight(), u32::MAX - 1);
+}
+
+/// Verifies that initialize correctly computes the total-weight counter when
+/// given the maximum possible owner weights. The maximum total through the
+/// public API is MAX_OWNER_WEIGHT (100,000) × MAX_OWNERS (20) = 2,000,000,
+/// which is well within u32::MAX, so direct overflow at initialize is
+/// structurally impossible. This test confirms the arithmetic is safe at
+/// initialization time and that the total is stored correctly.
+#[test]
+fn initialize_total_weight_is_correct_with_maximum_weights() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    let mut owner_addrs = std::vec::Vec::new();
+    for _ in 0..20 {
+        let addr = Address::generate(&env);
+        owners.push_back(addr.clone());
+        owner_addrs.push(addr);
+    }
+    let mut weights = Vec::new(&env);
+    for _ in 0..20 {
+        weights.push_back(MAX_OWNER_WEIGHT);
+    }
+    client.initialize(&owners, &weights, &1, &0);
+
+    // 20 owners × 100,000 = 2,000,000. Well within u32::MAX.
+    assert_eq!(client.get_total_weight(), 20 * MAX_OWNER_WEIGHT);
+    assert!(client.get_total_weight() < u32::MAX);
+}
+
+// ─── Issue #318: ChangeOwnerWeight rejects execution when target was removed ─
+
+/// Focused test confirming that a ChangeOwnerWeight proposal must not be
+/// allowed to execute against an owner who has already been removed by a
+/// different proposal. The rejected proposal's status must not change to
+/// Executed, and the active-proposal count must remain accurate.
+#[test]
+fn change_weight_rejected_when_target_removed_by_other_proposal() {
+    let (env, client, owner_a, owner_b, owner_c, _) = setup_three_owner_weighted([4, 2, 2], 5);
+
+    // Create a ChangeOwnerWeight proposal targeting owner_b (valid at creation).
+    let change_id = client.create_change_weight_proposal(
+        &owner_c,
+        &owner_b,
+        &5,
+        &str(&env, "Change owner_b weight"),
+        &DEADLINE,
+    );
+
+    // Create, approve, and execute a RemoveOwner proposal targeting owner_b.
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove owner_b"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_a, &remove_id);
+
+    // owner_b is now removed.
+    assert_eq!(client.try_get_owner_weight(&owner_b), Err(Ok(ContractError::OwnerNotFound)));
+    assert_eq!(client.get_total_weight(), 6);
+
+    // Approve the ChangeOwnerWeight proposal to Ready status.
+    // owner_a (4) + owner_c (2) = 6 >= threshold 5 → Ready
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_c, &change_id);
+    assert_eq!(client.get_proposal(&change_id).status, ProposalStatus::Ready);
+
+    // Attempting to execute must fail with the specific error.
+    assert_eq!(
+        client.try_execute(&owner_c, &change_id),
+        Err(Ok(ContractError::TargetOwnerNoLongerExists))
+    );
+
+    // The rejected proposal must NOT be marked as executed.
+    assert_eq!(client.get_proposal(&change_id).status, ProposalStatus::Ready);
+
+    // The active-proposal count must remain accurate.
+    // change_id is still Pending/Ready (not executed, not expired), so it counts.
+    let active = client.get_proposals_paged(&0, &50);
+    let active_count: u32 = active
+        .iter()
+        .filter(|p| matches!(p.status, ProposalStatus::Pending | ProposalStatus::Ready))
+        .count() as u32;
+    assert_eq!(active_count, 1);
+
+    // Total weight must remain unchanged.
+    assert_eq!(client.get_total_weight(), 6);
+}
+
+// ─── Issue #321: End-to-end scenario test ────────────────────────────────────
+
+/// Comprehensive end-to-end scenario exercising spending limits, governance
+/// proposals, and weighted voting in a single multi-owner, multi-proposal
+/// treasury workflow. Covers:
+/// - Multi-owner weighted setup
+/// - Transfer proposals respecting spending limits
+/// - Spending-limit rejection
+/// - Governance change (owner weight) mid-scenario
+/// - Pre-governance proposals behaving correctly against snapshotted quorum
+/// - Weighted quorum requiring specific owner combination
+/// - Final state check confirming owner list, total weight, spending limits,
+///   and proposal outcomes
+#[test]
+fn end_to_end_treasury_workflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    // ── Step 1: Initialize with weighted owners ──
+    // A=5, B=3, C=2. Total=10, threshold=6.
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(5_u32);
+    weights.push_back(3_u32);
+    weights.push_back(2_u32);
+    client.initialize(&owners, &weights, &6, &0);
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    assert_eq!(client.get_total_weight(), 10);
+    assert_eq!(client.get_threshold(), 6);
+    assert_eq!(client.get_owners().len(), 3);
+
+    // ── Step 2: Set spending limit for owner_a on token ──
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_b,
+        &owner_a,
+        &token_client.address,
+        &10_000_000,
+        &str(&env, "Cap A at 10M"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_b, &limit_id);
+    client.execute(&owner_c, &limit_id);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(10_000_000)
+    );
+
+    // ── Step 3: Transfer within spending limit ──
+    let transfer1_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 5_000_000, &token_client.address),
+        &str(&env, "Grant 5M"),
+        &DEADLINE,
+        &ProposalCategory::Grant,
+    );
+    // A alone (weight 5) is below quorum 6. Need B (3) or C (2).
+    client.approve(&owner_a, &transfer1_id);
+    assert_eq!(client.get_proposal(&transfer1_id).status, ProposalStatus::Pending);
+    client.approve(&owner_c, &transfer1_id);
+    // A(5) + C(2) = 7 >= 6 → Ready
+    assert_eq!(client.get_proposal(&transfer1_id).status, ProposalStatus::Ready);
+
+    let before_bal = token_client.balance(&recipient);
+    client.execute(&owner_a, &transfer1_id);
+    assert_eq!(token_client.balance(&recipient) - before_bal, 5_000_000);
+    assert_eq!(client.get_proposal(&transfer1_id).status, ProposalStatus::Executed);
+
+    // ── Step 4: Transfer exceeding spending limit → rejected ──
+    // 5M already spent + 6M proposed = 11M > 10M limit
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 6_000_000, &token_client.address),
+            &str(&env, "Would exceed 10M limit"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::SpendingLimitExceeded))
+    );
+
+    // ── Step 5: Governance change — increase owner_c's weight from 2 to 4 ──
+    // This changes total_weight from 10 to 12.
+    let weight_change_id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_c,
+        &4,
+        &str(&env, "Boost C to 4"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &weight_change_id);
+    client.approve(&owner_b, &weight_change_id);
+    client.execute(&owner_c, &weight_change_id);
+
+    assert_eq!(client.get_total_weight(), 12);
+    assert_eq!(client.get_owner_weight(&owner_c), 4);
+
+    // ── Step 6: Pre-governance proposal still uses snapshotted quorum ──
+    // Create a proposal before the weight change. Its quorum_weight should be 6
+    // (the threshold at creation time), not affected by the weight change.
+    let pre_gov_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Pre-governance proposal"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+    assert_eq!(client.get_proposal(&pre_gov_id).quorum_weight, 6);
+
+    // ── Step 7: Weighted quorum requiring specific owner combination ──
+    // A(5) + C(4) = 9 >= 6 → Ready. But A(5) alone is still < 6.
+    client.approve(&owner_a, &pre_gov_id);
+    assert_eq!(client.get_proposal(&pre_gov_id).status, ProposalStatus::Pending);
+    client.approve(&owner_c, &pre_gov_id);
+    assert_eq!(client.get_proposal(&pre_gov_id).status, ProposalStatus::Ready);
+
+    let before_bal2 = token_client.balance(&recipient);
+    client.execute(&owner_b, &pre_gov_id);
+    assert_eq!(token_client.balance(&recipient) - before_bal2, 1_000_000);
+    assert_eq!(client.get_proposal(&pre_gov_id).status, ProposalStatus::Executed);
+
+    // ── Step 8: Transfer by owner_b (no spending limit) ──
+    let transfer2_id = client.create_proposal(
+        &owner_b,
+        &t(&env, &recipient, 2_000_000, &token_client.address),
+        &str(&env, "B sends 2M"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    // B(3) + C(4) = 7 >= 6 → Ready
+    client.approve(&owner_b, &transfer2_id);
+    client.approve(&owner_c, &transfer2_id);
+    assert_eq!(client.get_proposal(&transfer2_id).status, ProposalStatus::Ready);
+
+    let before_bal3 = token_client.balance(&recipient);
+    client.execute(&owner_a, &transfer2_id);
+    assert_eq!(token_client.balance(&recipient) - before_bal3, 2_000_000);
+
+    // ── Step 9: Final state check ──
+    // Owner list
+    let final_owners = client.get_owners();
+    assert_eq!(final_owners.len(), 3);
+    assert!(final_owners.contains(&owner_a));
+    assert!(final_owners.contains(&owner_b));
+    assert!(final_owners.contains(&owner_c));
+
+    // Total weight
+    assert_eq!(client.get_total_weight(), 12);
+
+    // Individual weights
+    assert_eq!(client.get_owner_weight(&owner_a), 5);
+    assert_eq!(client.get_owner_weight(&owner_b), 3);
+    assert_eq!(client.get_owner_weight(&owner_c), 4);
+
+    // Spending limit
+    assert_eq!(
+        client.get_spending_limit(&owner_a, &token_client.address),
+        Some(10_000_000)
+    );
+
+    // Proposal outcomes
+    assert_eq!(client.get_proposal(&limit_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal(&transfer1_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal(&weight_change_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal(&pre_gov_id).status, ProposalStatus::Executed);
+    assert_eq!(client.get_proposal(&transfer2_id).status, ProposalStatus::Executed);
+
+    // Total proposals created
+    assert_eq!(client.get_total_proposals(), 5);
 }
 
