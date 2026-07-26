@@ -278,6 +278,341 @@ Returns `true` if `owner` has approved `proposal_id`.
 
 ---
 
+## Governance Proposals
+
+These four functions create **governance proposals**. Like `create_proposal`, each returns a new proposal ID and then follows the standard **create → approve → execute** lifecycle: the returned proposal must reach the approval threshold via `approve` and then be run with `execute` before it takes effect. All four require the `proposer` to be a current owner and require the contract not to be frozen, and all enforce the same `description` (1–300 characters), `deadline` (strictly future, ≤ 90 days ahead), and active-proposal-cap (≤ 50) rules as `create_proposal`. Each emits `("created",)` → `ProposalCreatedEvent` with an empty `transfers` list and `category = Other`.
+
+The JavaScript examples below assume `server` (an `rpc.Server`), `CONTRACT_ID`, and `networkPassphrase` are already defined, and reuse this helper to build, prepare, sign, and submit an owner-authorized write:
+
+```js
+import { Contract, TransactionBuilder, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+
+const contract = new Contract(CONTRACT_ID);
+
+// Build → prepare (simulate) → sign with the proposer's key → submit.
+async function submitOwnerCall(op, proposerKeypair) {
+  const account = await server.getAccount(proposerKeypair.publicKey());
+  const tx = new TransactionBuilder(account, { fee: "100", networkPassphrase })
+    .addOperation(op)
+    .setTimeout(30)
+    .build();
+  const prepared = await server.prepareTransaction(tx);
+  prepared.sign(proposerKeypair); // or a wallet's signTransaction()
+  return server.sendTransaction(prepared);
+}
+```
+
+### `create_add_owner_proposal`
+
+```rust
+fn create_add_owner_proposal(
+    env: Env,
+    proposer: Address,
+    new_owner: Address,
+    description: String,
+    deadline: u64,
+) -> Result<u64, ContractError>
+```
+
+Proposes adding `new_owner` to the multisig. On execution the new owner is stored with the minimum voting weight of `1`. Returns the new proposal ID.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `new_owner` | `Address` | Must not already be an owner. Current owner count must be `< 20` (`MAX_OWNERS`). |
+| `description` | `String` | 1–300 characters |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent`
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `DuplicateOwner`, `InvalidOwners`, `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_add_owner_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(newOwner, { type: "address" }),
+    nativeToScVal(description, { type: "string" }),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+  ),
+  proposerKeypair,
+);
+```
+
+### `create_remove_owner_proposal`
+
+```rust
+fn create_remove_owner_proposal(
+    env: Env,
+    proposer: Address,
+    owner_to_remove: Address,
+    description: String,
+    deadline: u64,
+) -> Result<u64, ContractError>
+```
+
+Proposes removing `owner_to_remove` from the multisig. Rejected at creation if the removal would drop the remaining total owner weight below the current threshold. Returns the new proposal ID.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `owner_to_remove` | `Address` | Must be a current owner. Remaining total weight after removal must stay ≥ threshold. |
+| `description` | `String` | 1–300 characters |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent`
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `OwnerNotFound`, `WouldBreakThreshold`, `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`, `ArithmeticError`
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_remove_owner_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(ownerToRemove, { type: "address" }),
+    nativeToScVal(description, { type: "string" }),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+  ),
+  proposerKeypair,
+);
+```
+
+### `create_change_threshold_proposal`
+
+```rust
+fn create_change_threshold_proposal(
+    env: Env,
+    proposer: Address,
+    new_threshold: u32,
+    description: String,
+    deadline: u64,
+) -> Result<u64, ContractError>
+```
+
+Proposes changing the approval threshold. The threshold is an **absolute weight value**, so it is validated against the current total owner weight rather than the owner count. Returns the new proposal ID.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `new_threshold` | `u32` | ≥ 1 and ≤ current total owner weight |
+| `description` | `String` | 1–300 characters |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent`
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `InvalidThreshold`, `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_change_threshold_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(newThreshold, { type: "u32" }),
+    nativeToScVal(description, { type: "string" }),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+  ),
+  proposerKeypair,
+);
+```
+
+### `create_spending_limit_proposal`
+
+```rust
+fn create_spending_limit_proposal(
+    env: Env,
+    proposer: Address,
+    owner: Address,
+    token: Address,
+    limit: i128,
+    description: String,
+    deadline: u64,
+) -> Result<u64, ContractError>
+```
+
+Proposes setting (or changing) a per-owner, per-token spending limit. Once executed, the limit caps the cumulative amount `owner` may propose for `token` within a fixed 30-day window; it is enforced in `create_proposal`. A `limit` of `0` blocks that token entirely for that owner. Returns the new proposal ID.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `owner` | `Address` | The owner the limit applies to |
+| `token` | `Address` | The token the limit applies to |
+| `limit` | `i128` | ≥ 0 (`0` blocks the token for that owner) |
+| `description` | `String` | 1–300 characters |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent`
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `InvalidAmount`, `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_spending_limit_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(owner, { type: "address" }),
+    nativeToScVal(token, { type: "address" }),
+    nativeToScVal(BigInt(limit), { type: "i128" }),
+    nativeToScVal(description, { type: "string" }),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+  ),
+  proposerKeypair,
+);
+```
+
+---
+
+## Guardian & Emergency Pause
+
+The guardian mechanism provides an emergency pause. **Unlike the create → approve → execute proposal flow used everywhere else in the contract, `set_guardian` and `unfreeze` are single-transaction, multi-owner calls.** They each take a `Vec<Address>` of *distinct* owners who must **all sign the same transaction**, and whose combined voting weight must reach the current threshold — there is no separate approval step and no stored proposal, so authorization and effect happen atomically in one call. `freeze`, by contrast, is authorized by the single registered guardian.
+
+Because `set_guardian` and `unfreeze` require several signatures on one transaction, each co-signing owner must add their signature to the **same** transaction envelope before it is submitted:
+
+```js
+import { Contract, TransactionBuilder, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+
+const contract = new Contract(CONTRACT_ID);
+
+// Encode a Vec<Address> of approver addresses.
+function approversScVal(approvers) {
+  return xdr.ScVal.scvVec(
+    approvers.map((a) => nativeToScVal(a, { type: "address" })),
+  );
+}
+
+// Build one transaction and collect a signature from every co-signing owner.
+async function submitCoSignedCall(op, sourceKeypair, coSignerKeypairs) {
+  const account = await server.getAccount(sourceKeypair.publicKey());
+  const tx = new TransactionBuilder(account, { fee: "100", networkPassphrase })
+    .addOperation(op)
+    .setTimeout(30)
+    .build();
+  const prepared = await server.prepareTransaction(tx);
+  for (const kp of coSignerKeypairs) prepared.sign(kp); // every approver signs the same tx
+  return server.sendTransaction(prepared);
+}
+```
+
+### `set_guardian`
+
+```rust
+fn set_guardian(env: Env, approvers: Vec<Address>, new_guardian: Address) -> Result<(), ContractError>
+```
+
+Assigns or replaces the guardian address. Requires distinct owner `approvers` whose combined weight reaches the threshold, all signing the same transaction.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `approvers` | `Vec<Address>` | Distinct current owners; each must authorize; combined weight ≥ threshold |
+| `new_guardian` | `Address` | The address to register as guardian |
+
+**Emits:** `("guard_set",)` → `GuardianSetEvent`
+
+**Errors:** `NotInitialized`, `DuplicateOwner`, `Unauthorized`, `ThresholdNotMet`
+
+```js
+await submitCoSignedCall(
+  contract.call(
+    "set_guardian",
+    approversScVal(approvers),
+    nativeToScVal(newGuardian, { type: "address" }),
+  ),
+  approverKeypairs[0],
+  approverKeypairs,
+);
+```
+
+### `freeze`
+
+```rust
+fn freeze(env: Env, guardian: Address) -> Result<(), ContractError>
+```
+
+Immediately freezes the contract, blocking new proposal creation and all execution. **Only the currently registered guardian may call this**, and only after a guardian has been set.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `guardian` | `Address` | Must equal the registered guardian. Must authorize. |
+
+**Emits:** `("frozen",)` → `FrozenEvent`
+
+**Errors:** `NoGuardian`, `Unauthorized`
+
+```js
+const account = await server.getAccount(guardianKeypair.publicKey());
+const tx = new TransactionBuilder(account, { fee: "100", networkPassphrase })
+  .addOperation(contract.call("freeze", nativeToScVal(guardian, { type: "address" })))
+  .setTimeout(30)
+  .build();
+const prepared = await server.prepareTransaction(tx);
+prepared.sign(guardianKeypair);
+await server.sendTransaction(prepared);
+```
+
+### `unfreeze`
+
+```rust
+fn unfreeze(env: Env, approvers: Vec<Address>) -> Result<(), ContractError>
+```
+
+Resumes normal operation after a freeze. Like `set_guardian`, requires distinct owner `approvers` whose combined weight reaches the threshold, all signing the same transaction.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `approvers` | `Vec<Address>` | Distinct current owners; each must authorize; combined weight ≥ threshold |
+
+**Emits:** `("unfrozen",)` → `UnfrozenEvent`
+
+**Errors:** `NotInitialized`, `DuplicateOwner`, `Unauthorized`, `ThresholdNotMet`
+
+```js
+await submitCoSignedCall(
+  contract.call("unfreeze", approversScVal(approvers)),
+  approverKeypairs[0],
+  approverKeypairs,
+);
+```
+
+### `get_guardian`
+
+```rust
+fn get_guardian(env: Env) -> Option<Address>
+```
+
+Returns the current guardian address, or `None` (decoded as `null`/`undefined`) if no guardian has been set. Read-only; no authorization required.
+
+```js
+import { scValToNative } from "@stellar/stellar-sdk";
+
+// Read-only: simulate the call and decode the result (no signing required).
+async function simulateView(fn) {
+  const account = await server.getAccount(SIM_SOURCE); // any funded account
+  const tx = new TransactionBuilder(account, { fee: "100", networkPassphrase })
+    .addOperation(contract.call(fn))
+    .setTimeout(30)
+    .build();
+  const sim = await server.simulateTransaction(tx);
+  return scValToNative(sim.result.retval);
+}
+
+const guardian = await simulateView("get_guardian"); // "G…" string, or null if unset
+```
+
+### `is_frozen`
+
+```rust
+fn is_frozen(env: Env) -> bool
+```
+
+Returns `true` if the contract is currently frozen. Read-only; no authorization required.
+
+```js
+// Reuses the read-only simulateView helper defined for get_guardian above.
+const frozen = await simulateView("is_frozen"); // boolean
+```
+
+---
+
 ## Error Reference
 
 The table below maps every `ContractError` discriminant to its cause and the recommended remediation. All codes are `u32` values encoded as `ScVal::Error` in XDR responses.

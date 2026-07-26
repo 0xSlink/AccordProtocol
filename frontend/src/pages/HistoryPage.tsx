@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Proposal, ProposalStatus } from "../types/accord";
+import type { Proposal, ProposalCategory, ProposalStatus } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import {
   getProposalsPaged,
@@ -9,6 +9,7 @@ import {
 } from "../lib/contract";
 
 type Filter = "all" | ProposalStatus;
+type CategoryFilter = "all" | ProposalCategory;
 
 const TABS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -19,6 +20,15 @@ const TABS: { key: Filter; label: string }[] = [
   { key: "revoked", label: "Revoked" },
 ];
 
+const CATEGORY_OPTIONS: { key: CategoryFilter; label: string }[] = [
+  { key: "all", label: "All Categories" },
+  { key: "transfer", label: "Transfer" },
+  { key: "payroll", label: "Payroll" },
+  { key: "grant", label: "Grant" },
+  { key: "ops", label: "Ops" },
+  { key: "other", label: "Other" },
+];
+
 export function HistoryPage({
   proposals,
   onApprove,
@@ -27,6 +37,7 @@ export function HistoryPage({
   onApprove: (id: number) => void;
 }) {
   const [activeTab, setActiveTab] = useState<Filter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [proposerFilter, setProposerFilter] = useState("");
   const [displayedProposals, setDisplayedProposals] = useState<Proposal[]>(proposals);
@@ -86,6 +97,7 @@ export function HistoryPage({
 
   const filteredProposals = displayedProposals
     .filter((p) => activeTab === "all" || p.status === activeTab)
+    .filter((p) => categoryFilter === "all" || p.category === categoryFilter)
     .filter((p) =>
       p.description.toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -134,6 +146,18 @@ export function HistoryPage({
               Export CSV
             </button>
           )}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value as CategoryFilter)}
+            aria-label="Filter by category"
+            className="text-xs px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-lg capitalize transition-colors hover:text-white focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+          >
+            {CATEGORY_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded-lg">
           {TABS.map((tab) => (
             <button
@@ -193,7 +217,7 @@ export function HistoryPage({
       <div className="space-y-3">
         {filteredProposals.length === 0 ? (
           <p className="text-zinc-600 text-sm py-8 text-center">
-            {searchTerm || proposerFilter
+            {searchTerm || proposerFilter || categoryFilter !== "all"
               ? "No proposals match your search"
               : `No ${activeTab === "all" ? "" : `${activeTab} `}proposals found`}
           </p>
