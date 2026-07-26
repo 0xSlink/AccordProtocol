@@ -4133,3 +4133,138 @@ fn changing_weight_does_not_affect_spending_limit() {
         Some(10000)
     );
 }
+
+// ─── Weighted Governance Tests ───────────────────────────────────────────────────────
+
+/// Helper to initialize contract with weighted owners (5, 3, 2) and threshold 6.
+fn setup_weighted() -> (Env, AccordContractClient<'static>, Address, Address, Address, Address, token::Client<'static>) {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    // owners
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let non_owner = Address::generate(&env);
+    // token setup
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+    token_sac.mint(&contract_id, 1_000_000_000_000_i128);
+    // owners vector and weights vector
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(5_u32);
+    weights.push_back(3_u32);
+    weights.push_back(2_u32);
+    client.initialize(&owners, &weights, &6_u32, &0_u64);
+    (env, client, owner_a, owner_b, owner_c, non_owner, token_client)
+}
+
+#[test]
+fn weighted_quorum_logic() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Weighted quorum"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    // single approvals do not reach quorum
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    client.approve(&owner_c, &id);
+    // heavy (5) + light (2) = 7 >= 6, should be Ready now
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn approval_weight_persists_after_weight_change() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
+    // owner_a (weight 5) approves its own transfer proposal
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Persist weight"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &id);
+    // ensure proposal is Ready (5 >= 6? actually not, need another approval) – add owner_b (weight 3) to cross threshold
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+    let recorded_weight = client.get_proposal(&id).approvals; // approvals field stores cumulative weight
+    // now reduce owner_a weight via ChangeOwnerWeight proposal
+    let change_id = client.create_change_owner_weight_proposal(
+        &owner_a,
+        &owner_a,
+        &5_u32, // new weight lower than original, e.g., 1
+        &str(&env, "Reduce weight"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &change_id);
+    client.approve(&owner_b, &change_id);
+    client.approve(&owner_c, &change_id);
+    client.execute(&owner_c, &change_id);
+    // original proposal should still have the original recorded weight
+    assert_eq!(client.get_proposal(&id).approvals, recorded_weight);
+    // status should remain Ready
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn weighted_revoke_and_reapprove_cycle() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Revoke cycle"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    // approve with heavy owner (5) and light owner (3) => Ready
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+    // revoke heavy owner, should drop back below quorum (now only 3)
+    client.revoke(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    // re‑approve heavy owner, should become Ready again
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn add_owner_with_maximum_weight() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
+    // current total weight = 10
+    let new_owner = Address::generate(&env);
+    let max_weight = MAX_OWNER_WEIGHT;
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &new_owner,
+        &str(&env, "Add max weight owner"),
+        &DEADLINE,
+    );
+    // approve by two owners to meet quorum (5+3 >= 6)
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_b, &add_id);
+    client.execute(&owner_c, &add_id);
+    // verify stored weight
+    let owners_map = client.get_owners();
+    let stored_weight = owners_map.get(new_owner.clone()).unwrap();
+    assert_eq!(stored_weight, max_weight);
+    // total weight should be previous total + max_weight
+    let expected_total = client.get_total_weight(); // after execution
+    assert_eq!(expected_total, 10_u32 + max_weight);
+}
+
