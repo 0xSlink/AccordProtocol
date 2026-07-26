@@ -592,7 +592,7 @@ fn create_proposal_rejects_non_owner() {
 }
 
 #[test]
-fn create_proposal_rejects_zero_amount() {
+fn create_proposal_rejects_zero_amount(){
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
     assert_eq!(
         client.try_create_proposal(
