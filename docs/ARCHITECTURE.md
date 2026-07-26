@@ -1,7 +1,7 @@
 # Accord Protocol — Architecture
 
 ## 1. System Overview
-
+ 
 ```text
 ┌──────────────────────────────┐
 │     Web Client (Vite/React)  │
