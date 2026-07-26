@@ -659,6 +659,163 @@ fn approve_records_ready_at_with_weighted_owners() {
     assert_eq!(p.ready_at, t2);
 }
 
+// ─── Event Payloads ───────────────────────────────────────────────────────────
+
+#[test]
+fn approve_emits_weight_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=2. Quorum = 8.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Event weight test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve owner_a (weight 5) — cumulative should be 5.
+    client.approve(&owner_a, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let approved_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("approved")
+    })
+    .expect("expected an 'approved' event");
+
+    let event_data = match &approved_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalApprovedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 5);
+    assert_eq!(event.cumulative_weight, 5);
+
+    // Approve owner_b (weight 3) — cumulative should be 8.
+    client.approve(&owner_b, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let approved_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("approved")
+    })
+    .expect("expected an 'approved' event");
+
+    let event_data = match &approved_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalApprovedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 3);
+    assert_eq!(event.cumulative_weight, 8);
+}
+
+#[test]
+fn revoke_emits_weight_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=2. Quorum = 8.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Revoke event weight test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve A (5) then B (3) to reach quorum 8.
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+
+    // Revoke B (weight 3) — cumulative should drop from 8 to 5.
+    client.revoke(&owner_b, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let revoked_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("revoked")
+    })
+    .expect("expected a 'revoked' event");
+
+    let event_data = match &revoked_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalRevokedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 3);
+    assert_eq!(event.cumulative_weight, 5);
+}
+
 // ─── Revoke ──────────────────────────────────────────────────────────────────
 
 #[test]

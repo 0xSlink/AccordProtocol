@@ -84,6 +84,8 @@ pub struct ProposalApprovedEvent {
     pub approver: Address,
     pub approvals: u32,
     pub threshold: u32,
+    pub weight: u32,
+    pub cumulative_weight: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,6 +94,8 @@ pub struct ProposalRevokedEvent {
     pub id: u64,
     pub approver: Address,
     pub approvals: u32,
+    pub weight: u32,
+    pub cumulative_weight: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1046,6 +1050,8 @@ impl AccordContract {
                 approver,
                 approvals: proposal.approvals,
                 threshold: proposal.quorum_weight,
+                weight,
+                cumulative_weight: proposal.approvals,
             },
         );
 
@@ -1091,6 +1097,8 @@ impl AccordContract {
                 id: proposal_id,
                 approver,
                 approvals: proposal.approvals,
+                weight,
+                cumulative_weight: proposal.approvals,
             },
         );
 

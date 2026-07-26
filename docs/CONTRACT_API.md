@@ -332,8 +332,10 @@ struct ProposalCreatedEvent {
 |-------|-----------|----------------|-------------|
 | `id` | `u64` | `ScVal::U64` | Proposal ID that received the approval |
 | `approver` | `Address` | `ScVal::Address` | Owner who approved |
-| `approvals` | `u32` | `ScVal::U32` | Running total of approvals after this vote |
-| `threshold` | `u32` | `ScVal::U32` | Approval threshold at vote time |
+| `approvals` | `u32` | `ScVal::U32` | Running cumulative approval weight after this vote |
+| `threshold` | `u32` | `ScVal::U32` | Approval threshold (quorum weight) at vote time |
+| `weight` | `u32` | `ScVal::U32` | Individual weight contributed by the approver |
+| `cumulative_weight` | `u32` | `ScVal::U32` | Resulting cumulative approval weight after this vote |
 
 ```rust
 struct ProposalApprovedEvent {
@@ -341,6 +343,8 @@ struct ProposalApprovedEvent {
     approver: Address,
     approvals: u32,
     threshold: u32,
+    weight: u32,
+    cumulative_weight: u32,
 }
 ```
 
@@ -357,13 +361,17 @@ struct ProposalApprovedEvent {
 |-------|-----------|----------------|-------------|
 | `id` | `u64` | `ScVal::U64` | Proposal ID the approval was revoked from |
 | `approver` | `Address` | `ScVal::Address` | Owner who revoked their approval |
-| `approvals` | `u32` | `ScVal::U32` | Remaining approval count after the revoke |
+| `approvals` | `u32` | `ScVal::U32` | Remaining cumulative approval weight after the revoke |
+| `weight` | `u32` | `ScVal::U32` | Individual weight that was removed by the revoke |
+| `cumulative_weight` | `u32` | `ScVal::U32` | Resulting cumulative approval weight after the revoke |
 
 ```rust
 struct ProposalRevokedEvent {
     id: u64,
     approver: Address,
     approvals: u32,
+    weight: u32,
+    cumulative_weight: u32,
 }
 ```
 
