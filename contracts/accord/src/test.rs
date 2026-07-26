@@ -836,7 +836,7 @@ fn approve_increments_count_and_sets_flag() {
 }
 
 #[test]
-fn get_proposal_approval_progress_returns_live_counts_and_total_owner_weight() {
+fn get_proposal_approval_progress_returns_live_counts_and_total_owner_weight(){
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let id = client.create_proposal(
         &owner_a,
