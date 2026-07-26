@@ -1677,7 +1677,8 @@ impl AccordContract {
 
     /// Returns a current owner's voting weight, or `OwnerNotFound` otherwise.
     pub fn get_owner_weight(env: Env, owner: Address) -> Result<u32, ContractError> {
-        require_owner_and_weight(&env, &owner)
+        let owners = read_owners_map(&env)?;
+        owners.get(owner).ok_or(ContractError::OwnerNotFound)
     }
 
     /// Returns the configured maximum percentage of total weight that one owner
@@ -1712,20 +1713,6 @@ impl AccordContract {
         let mut proposal = read_proposal(&env, proposal_id)?;
         proposal.status = derive_status(&env, &proposal);
         Ok(proposal)
-    }
-
-    /// Returns current approval progress for a proposal in one call.
-    ///
-    /// `approval_weight` is the current cumulative approval weight for the proposal.
-    /// `quorum_weight` is the snapshotted required approval weight stored on the proposal.
-    /// `total_weight` is the current total owner weight in the contract.
-    pub fn get_proposal_approval_progress(
-        env: Env,
-        proposal_id: u64,
-    ) -> Result<(u32, u32, u32), ContractError> {
-        let proposal = read_proposal(&env, proposal_id)?;
-        let total_weight = read_total_weight(&env);
-        Ok((proposal.approvals, proposal.quorum_weight, total_weight))
     }
 
     /// Returns a page of proposals. `offset` is a 0-based index; `limit` is capped at 20.
