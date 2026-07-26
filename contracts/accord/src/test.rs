@@ -87,10 +87,6 @@ fn setup_with_timelock(
     owners.push_back(owner_c.clone());
 
     let mut weights = Vec::new(&env);
-    weights.push_back(1);
-    weights.push_back(1);
-    weights.push_back(1);
-        let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -548,6 +544,121 @@ fn approve_returns_arithmetic_error_on_overflow() {
     );
 }
 
+// ─── Weighted Approve ────────────────────────────────────────────────────────
+
+#[test]
+fn approve_transitions_to_ready_with_weighted_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: Owner A = 5, Owner B = 3, Owner C = 2. Quorum = 8.
+    // Cumulative weight from A+B is 8, meeting the threshold.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Weighted status"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Owner A (weight 5) alone should not reach quorum 8.
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Owner B (weight 3) pushes cumulative to 8, reaching quorum.
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn approve_records_ready_at_with_weighted_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: Owner A = 3, Owner B = 3, Owner C = 1. Quorum = 5.
+    // A+B = 6 >= 5, crosses threshold on second approval.
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &5, &3600); // time-lock of 1h to exercise ready_at
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000_000, &token_client.address),
+        &str(&env, "Ready-at weighted"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).ready_at, 0);
+
+    // Owner A (weight 3) — not yet at quorum 5.
+    let t1 = NOW + 100;
+    set_timestamp(&env, t1);
+    client.approve(&owner_a, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approvals, 3);
+    assert_eq!(p.ready_at, 0);
+
+    // Owner B (weight 3) — cumulative reaches 6, crossing quorum 5.
+    let t2 = t1 + 200;
+    set_timestamp(&env, t2);
+    client.approve(&owner_b, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approvals, 6);
+    assert_eq!(p.ready_at, t2);
+}
+
 // ─── Revoke ──────────────────────────────────────────────────────────────────
 
 #[test]
@@ -953,13 +1064,9 @@ fn full_lifecycle_5of5() {
     owners.push_back(owner_b.clone());
     owners.push_back(owner_c.clone());
 
-    let mut weights = Vec::new(&env);
-    weights.push_back(1);
-    weights.push_back(1);
-    weights.push_back(1);
     owners.push_back(owner_d.clone());
     owners.push_back(owner_e.clone());
-        let mut weights = Vec::new(&env);
+    let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }
@@ -1024,10 +1131,6 @@ fn execute_fails_when_balance_insufficient() {
     owners.push_back(owner_c.clone());
 
     let mut weights = Vec::new(&env);
-    weights.push_back(1);
-    weights.push_back(1);
-    weights.push_back(1);
-        let mut weights = Vec::new(&env);
     for _ in 0..owners.len() {
         weights.push_back(1);
     }

@@ -519,12 +519,13 @@ impl AccordContract {
         if n == 0 || n > MAX_OWNERS {
             return Err(ContractError::InvalidOwners);
         }
-        if threshold == 0 || threshold > n {
-            return Err(ContractError::InvalidThreshold);
-        }
 
         if owners.len() != weights.len() {
             return Err(ContractError::InvalidWeightsLength);
+        }
+
+        if threshold == 0 {
+            return Err(ContractError::InvalidThreshold);
         }
 
         let mut total_weight: u32 = 0;
@@ -549,6 +550,9 @@ impl AccordContract {
                 write_owner_weight(&env, &owner, weight);
             }
             total_weight = total_weight.checked_add(weight).ok_or(ContractError::ArithmeticError)?;
+        }
+        if threshold > total_weight {
+            return Err(ContractError::InvalidThreshold);
         }
         write_total_weight(&env, total_weight);
 
@@ -937,7 +941,7 @@ impl AccordContract {
 
         let owners = read_owners(&env)?;
 
-        if new_threshold == 0 || new_threshold > owners.len() {
+        if new_threshold == 0 || new_threshold > read_total_weight(&env) {
             return Err(ContractError::InvalidThreshold);
         }
 
