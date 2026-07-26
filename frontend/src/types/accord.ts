@@ -2,9 +2,12 @@ export type ProposalStatus = "pending" | "ready" | "executed" | "expired" | "rev
 
 export type ProposalKind = "transfer" | "add_owner" | "remove_owner" | "change_threshold" | "set_spending_limit";
 
+export type ProposalCategory = "transfer" | "payroll" | "grant" | "ops" | "other";
+
 export type Proposal = {
   id: number;
   kind: ProposalKind;
+  category: ProposalCategory;
   to: string;
   amount: string;
   token: string;
@@ -18,6 +21,7 @@ export type Proposal = {
   proposer: string;
   userHasApproved: boolean;
   approverAddresses: string[];
+  executedAt?: string | null;
 };
 
 export type Owner = {

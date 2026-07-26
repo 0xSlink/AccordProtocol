@@ -6,7 +6,7 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Proposal, ProposalKind, ProposalStatus } from "../types/accord";
+import type { Proposal, ProposalCategory, ProposalKind, ProposalStatus } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
@@ -46,6 +46,32 @@ function mapStatus(raw: unknown): ProposalStatus {
     return key.toLowerCase() as ProposalStatus;
   }
   return "pending";
+}
+
+function mapCategory(raw: unknown): ProposalCategory {
+  // Soroban unit-enum variants decode either to their name as a string or to a
+  // single-key object, so handle both shapes like mapStatus does. Anything
+  // unrecognised (including an unset category) falls back to "other".
+  let key: string;
+  if (typeof raw === "string") {
+    key = raw;
+  } else if (raw && typeof raw === "object") {
+    key = Object.keys(raw as object)[0] ?? "Other";
+  } else {
+    return "other";
+  }
+  switch (key.toLowerCase()) {
+    case "transfer":
+      return "transfer";
+    case "payroll":
+      return "payroll";
+    case "grant":
+      return "grant";
+    case "ops":
+      return "ops";
+    default:
+      return "other";
+  }
 }
 
 function safeBigInt(value: unknown): bigint {
@@ -122,6 +148,7 @@ export function mapProposal(raw: any, threshold: number): Proposal {
   return {
     id: Number(raw.id),
     kind: mapped.kind,
+    category: mapCategory(raw.category),
     to: mapped.to,
     amount: mapped.amount,
     token: mapped.token,
@@ -135,6 +162,7 @@ export function mapProposal(raw: any, threshold: number): Proposal {
     proposer: shortenAddr(String(raw.proposer)),
     userHasApproved: false,
     approverAddresses: [],
+    executedAt: formatDeadline(rawDeadline),
   };
 }
 

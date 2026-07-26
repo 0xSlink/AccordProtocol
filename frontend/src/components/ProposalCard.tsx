@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { Proposal, ProposalKind } from "../types/accord";
+import type { Proposal, ProposalCategory, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
 import { StatusBadge } from "./StatusBadge";
 import { Check, Copy, Link2 } from "lucide-react";
@@ -19,6 +19,15 @@ const KIND_LABELS: Record<ProposalKind, { title: string; badge: string }> = {
   remove_owner: { title: "Remove Owner", badge: "Governance" },
   change_threshold: { title: "Change Threshold", badge: "Governance" },
   set_spending_limit: { title: "Set Spending Limit", badge: "Spending Limit" },
+};
+
+// Colour palette per category, mirroring the pill styling used by StatusBadge.
+const CATEGORY_STYLES: Record<ProposalCategory, string> = {
+  transfer: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+  payroll: "bg-violet-500/10 text-violet-400 border border-violet-500/20",
+  grant: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+  ops: "bg-sky-500/10 text-sky-400 border border-sky-500/20",
+  other: "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20",
 };
 
 function KindSummary({ proposal }: { proposal: Proposal }): ReactNode {
@@ -111,7 +120,7 @@ function KindSummary({ proposal }: { proposal: Proposal }): ReactNode {
   }
 }
 
-export function ProposalCard({
+export const ProposalCard = React.memo(function ProposalCard({
   proposal,
   walletAddress,
   onApprove,
@@ -231,6 +240,13 @@ export function ProposalCard({
               <Link2 size={16} />
             )}
           </button>
+          <span
+            role="note"
+            aria-label={`Category: ${proposal.category}`}
+            className={`text-xs px-2 py-0.5 rounded-full font-mono capitalize ${CATEGORY_STYLES[proposal.category]}`}
+          >
+            {proposal.category}
+          </span>
           <StatusBadge status={proposal.status} />
         </div>
       </div>
@@ -304,4 +320,4 @@ export function ProposalCard({
       </div>
     </div>
   );
-}
+});

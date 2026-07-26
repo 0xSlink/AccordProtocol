@@ -1,7 +1,8 @@
 #![no_std]
+#![allow(deprecated)]
 pub mod validate;
 
-use soroban_sdk::{
+use soroban_sdk::{Map, 
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
     IntoVal, String, Symbol, Val, Vec,
 };
@@ -40,6 +41,17 @@ pub enum ProposalKind {
     /// SetSpendingLimit(owner, token, limit) — per-owner cap on the amount that
     /// `owner` may propose for `token`. A limit of 0 blocks that token entirely.
     SetSpendingLimit(Address, Address, i128),
+    /// ChangeOwnerWeight(target_owner, new_weight) — updates an existing owner's
+    /// voting weight. Zero is never valid: remove an owner instead of leaving a
+    /// listed owner unable to participate in governance.
+    ChangeOwnerWeight(Address, u32),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SpentTracker {
+    pub spent: i128,
+    pub epoch: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,12 +81,30 @@ pub struct Proposal {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct ProposalApprovalProgress {
+    pub approval_weight: u32,
+    pub quorum_weight: u32,
+    pub total_weight: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct ProposalCreatedEvent {
     pub id: u64,
     pub proposer: Address,
     pub threshold: u32,
     pub category: ProposalCategory,
     pub transfers: Vec<Transfer>,
+    /// The weighted quorum this proposal must reach to become `Ready`. Snapshotted
+    /// at creation so auditors can reconstruct the exact approval requirement even
+    /// after the threshold changes via a later governance proposal.
+    pub quorum_weight: u32,
+    /// Sum of all owner weights at the moment this proposal was created. Because
+    /// owners can be added, removed, or re-weighted after creation, this field is
+    /// the only way to recover the original total-weight context from the event
+    /// log alone — it is not derivable from current contract state once ownership
+    /// changes.
+    pub total_weight_at_creation: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,6 +161,36 @@ pub struct UpgradeExecutedEvent {
     pub new_wasm_hash: BytesN<32>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AddOwnerExecutedEvent {
+    pub new_owner: Address,
+    pub owner_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RemoveOwnerExecutedEvent {
+    pub removed_owner: Address,
+    pub owner_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ChangeThresholdExecutedEvent {
+    pub previous_threshold: u32,
+    pub new_threshold: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SetSpendingLimitExecutedEvent {
+    pub owner: Address,
+    pub token: Address,
+    pub previous_limit: Option<i128>,
+    pub new_limit: i128,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,6 +227,8 @@ pub enum ContractError {
     SpendingLimitExceeded = 28,
     InvalidWeight = 29,
     InvalidWeightsLength = 30,
+    SingleOwnerWeightCapExceeded = 31,
+    TargetOwnerNoLongerExists = 32,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -215,13 +277,28 @@ fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Add
     (symbol_short!("SLIMIT"), owner.clone(), token.clone())
 }
 
-
 fn total_weight_key() -> Symbol {
     symbol_short!("TWEIGHT")
 }
 
-fn owner_weight_key(owner: &Address) -> (Symbol, Address) {
-    (symbol_short!("OWEIGHT"), owner.clone())
+fn max_single_owner_weight_pct_key() -> Symbol {
+    symbol_short!("MAXOWNP")
+}
+
+fn read_max_single_owner_weight_pct(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&max_single_owner_weight_pct_key())
+        .unwrap_or(DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT)
+}
+
+fn owner_weight_within_cap(env: &Env, owner_weight: u32, total_weight: u32) -> bool {
+    (owner_weight as u64) * 100
+        <= (total_weight as u64) * (read_max_single_owner_weight_pct(env) as u64)
+}
+
+fn spent_tracking_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
+    (symbol_short!("SPENT"), owner.clone(), token.clone())
 }
 
 // ─── TTL Constants ───────────────────────────────────────────────────────────
@@ -281,7 +358,20 @@ const MAX_PROPOSAL_DURATION: u64 = 7_776_000;
 const MIN_OWNER_WEIGHT: u32 = 1;
 /// Maximum owner weight.
 const MAX_OWNER_WEIGHT: u32 = 100_000;
+/// Highest configurable share of total voting weight any one owner may receive
+/// via a weight-change proposal. A strict majority would permit unilateral quorum.
+const MAX_SINGLE_OWNER_WEIGHT_PCT: u32 = 50;
+const DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT: u32 = MAX_SINGLE_OWNER_WEIGHT_PCT;
 
+/// Spending window: 30 days in seconds. The cumulative spent amount per (owner, token)
+/// resets when this window elapses since the first tracked spend in the window.
+/// Epoch-based window: the window clock starts ticking from the timestamp of the first
+/// spend (or when the limit was set). This is deterministic — two contracts with the
+/// same set of operations will arrive at identical window boundaries. A rolling window
+/// (sliding per-transaction) was considered but rejected because it would make the
+/// "available limit" view depend on the exact time of each prior transaction, producing
+/// non-deterministic behavior across nodes executing the same transaction sequence.
+const SPENDING_WINDOW: u64 = 2_592_000;
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
@@ -299,9 +389,9 @@ fn read_threshold(env: &Env) -> Result<u32, ContractError> {
         .ok_or(ContractError::NotInitialized)
 }
 
-fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
+fn read_owners_map(env: &Env) -> Result<Map<Address, u32>, ContractError> {
     let key = owners_key();
-    let owners: Vec<Address> = env
+    let owners: Map<Address, u32> = env
         .storage()
         .persistent()
         .get(&key)
@@ -311,7 +401,10 @@ fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
 }
 
 fn read_total_weight(env: &Env) -> u32 {
-    env.storage().instance().get(&total_weight_key()).unwrap_or(0)
+    env.storage()
+        .instance()
+        .get(&total_weight_key())
+        .unwrap_or(0)
 }
 
 fn write_total_weight(env: &Env, weight: u32) {
@@ -319,20 +412,9 @@ fn write_total_weight(env: &Env, weight: u32) {
     bump_instance(env);
 }
 
-fn read_owner_weight(env: &Env, owner: &Address) -> u32 {
-    let key = owner_weight_key(owner);
-    let weight = env.storage().persistent().get(&key).unwrap_or(MIN_OWNER_WEIGHT);
-    if env.storage().persistent().has(&key) {
-        bump_persistent(env, &key);
-    }
-    weight
-}
 
-fn write_owner_weight(env: &Env, owner: &Address, weight: u32) {
-    let key = owner_weight_key(owner);
-    env.storage().persistent().set(&key, &weight);
-    bump_persistent(env, &key);
-}
+
+
 
 
 fn read_next_id(env: &Env) -> u64 {
@@ -399,6 +481,34 @@ fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128
     bump_persistent(env, &key);
 }
 
+fn read_spent_tracker(env: &Env, owner: &Address, token: &Address) -> SpentTracker {
+    let key = spent_tracking_key(owner, token);
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(SpentTracker { spent: 0, epoch: 0 })
+}
+
+fn write_spent_tracker(env: &Env, owner: &Address, token: &Address, tracker: &SpentTracker) {
+    let key = spent_tracking_key(owner, token);
+    env.storage().persistent().set(&key, tracker);
+    bump_persistent(env, &key);
+}
+
+/// Returns the amount effectively spent within the current spending window.
+/// If no window is active (epoch == 0) or the window has expired, returns 0.
+fn effective_spent(env: &Env, owner: &Address, token: &Address) -> i128 {
+    let tracker = read_spent_tracker(env, owner, token);
+    if tracker.epoch == 0 {
+        return 0;
+    }
+    let now = env.ledger().timestamp();
+    if now > tracker.epoch.saturating_add(SPENDING_WINDOW) {
+        return 0;
+    }
+    tracker.spent
+}
+
 fn read_active_count(env: &Env) -> u32 {
     // Recompute active proposals (Pending + Ready) to ensure expired/ executed
     // proposals are not counted, guarding against any missed decrements.
@@ -455,13 +565,36 @@ fn require_not_frozen(env: &Env) -> Result<(), ContractError> {
 
 // ─── Business Logic Helpers ──────────────────────────────────────────────────
 
-fn require_owner(env: &Env, address: &Address) -> Result<(), ContractError> {
-    // Issue #86: use contains() for early-exit O(n) scan, cleaner than manual loop
-    let owners = read_owners(env)?;
-    if owners.contains(address) {
-        return Ok(());
+fn require_owner_and_weight(env: &Env, address: &Address) -> Result<u32, ContractError> {
+    let owners = read_owners_map(env)?;
+    owners.get(address.clone()).ok_or(ContractError::Unauthorized)
+}
+
+/// Validates privileged co-signers by distinct address and cumulative voting
+/// weight. Each address is added at most once, so an owner's weight cannot be
+/// counted repeatedly.
+fn require_weighted_approvers(env: &Env, approvers: &Vec<Address>) -> Result<(), ContractError> {
+    for i in 0..approvers.len() {
+        for j in (i + 1)..approvers.len() {
+            if approvers.get(i).unwrap() == approvers.get(j).unwrap() {
+                return Err(ContractError::DuplicateOwner);
+            }
+        }
     }
-    Err(ContractError::Unauthorized)
+
+    let threshold = read_threshold(env)?;
+    let mut weight: u32 = 0;
+    for approver in approvers.iter() {
+        approver.require_auth();
+        let approver_weight = require_owner_and_weight(env, &approver)?;
+        weight = weight
+            .checked_add(approver_weight)
+            .ok_or(ContractError::ArithmeticError)?;
+    }
+    if weight < threshold {
+        return Err(ContractError::ThresholdNotMet);
+    }
+    Ok(())
 }
 
 fn derive_status(env: &Env, proposal: &Proposal) -> ProposalStatus {
@@ -543,25 +676,40 @@ impl AccordContract {
         }
 
         // Require auth from all owners and validate/store weights.
+        let mut owners_map = Map::new(&env);
         for i in 0..owners.len() {
             let owner = owners.get(i).unwrap();
             let weight = weights.get(i).unwrap();
-            if weight < MIN_OWNER_WEIGHT || weight > MAX_OWNER_WEIGHT {
+            if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&weight) {
                 return Err(ContractError::InvalidWeight);
             }
             owner.require_auth();
-            if weight != MIN_OWNER_WEIGHT {
-                write_owner_weight(&env, &owner, weight);
-            }
-            total_weight = total_weight.checked_add(weight).ok_or(ContractError::ArithmeticError)?;
+            owners_map.set(owner.clone(), weight);
+            total_weight = total_weight
+                .checked_add(weight)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+
+        // Validate threshold against total weight, not owner count. The threshold
+        // is an absolute weight value — a proposal requires this many weight-units
+        // of approval, not this many individual owners. Validating against
+        // total_weight ensures the threshold is achievable given the current
+        // weight distribution.
+        if threshold == 0 || threshold > total_weight {
+            return Err(ContractError::InvalidThreshold);
         }
         if threshold > total_weight {
             return Err(ContractError::InvalidThreshold);
         }
+
         write_total_weight(&env, total_weight);
+        env.storage().instance().set(
+            &max_single_owner_weight_pct_key(),
+            &DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT,
+        );
 
         let key = owners_key();
-        env.storage().persistent().set(&key, &owners);
+        env.storage().persistent().set(&key, &owners_map);
         bump_persistent(&env, &key);
 
         env.storage().instance().set(&threshold_key(), &threshold);
@@ -590,7 +738,7 @@ impl AccordContract {
         category: ProposalCategory,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         let transfers_len = transfers.len();
@@ -627,8 +775,15 @@ impl AccordContract {
                 }
             }
             for i in 0..checked_tokens.len() {
-                if let Some(limit) = read_spending_limit(&env, &proposer, &checked_tokens.get(i).unwrap()) {
-                    if checked_totals.get(i).unwrap() > limit {
+                let token = checked_tokens.get(i).unwrap();
+                if let Some(limit) = read_spending_limit(&env, &proposer, &token) {
+                    let already_spent = effective_spent(&env, &proposer, &token);
+                    let cumulative = checked_totals
+                        .get(i)
+                        .unwrap()
+                        .checked_add(already_spent)
+                        .ok_or(ContractError::ArithmeticError)?;
+                    if cumulative > limit {
                         return Err(ContractError::SpendingLimitExceeded);
                     }
                 }
@@ -675,6 +830,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -683,6 +839,8 @@ impl AccordContract {
                 threshold,
                 category,
                 transfers,
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -698,14 +856,12 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
-        for owner in owners.iter() {
-            if owner == new_owner {
-                return Err(ContractError::DuplicateOwner);
-            }
+        let owners = read_owners_map(&env)?;
+        if owners.contains_key(new_owner.clone()) {
+            return Err(ContractError::DuplicateOwner);
         }
 
         if owners.len() >= MAX_OWNERS {
@@ -752,6 +908,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -760,6 +917,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -779,7 +938,7 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
         if limit < 0 {
@@ -825,6 +984,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -833,6 +993,106 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
+            },
+        );
+
+        Ok(id)
+    }
+
+    /// Creates a proposal to change an existing owner's voting weight.
+    ///
+    /// # Arguments
+    /// * `proposer` - Owner proposing the change. Must authorize.
+    /// * `target_owner` - Address of the owner whose weight to change. Must be
+    ///   a current owner.
+    /// * `new_weight` - The new voting weight. Must be nonzero, within
+    ///   [MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT], and no more than the configured
+    ///   share of the resulting total weight. Use `RemoveOwner` to revoke voting.
+    pub fn create_change_weight_proposal(
+        env: Env,
+        proposer: Address,
+        target_owner: Address,
+        new_weight: u32,
+        description: String,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner_and_weight(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&new_weight) {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let owners = read_owners_map(&env)?;
+        if !owners.contains_key(target_owner.clone()) {
+            return Err(ContractError::OwnerNotFound);
+        }
+
+        let target_weight = owners.get(target_owner.clone()).unwrap();
+
+        let current_total = read_total_weight(&env);
+        let resulting_total = current_total
+            .checked_sub(target_weight)
+            .ok_or(ContractError::ArithmeticError)?
+            .checked_add(new_weight)
+            .ok_or(ContractError::ArithmeticError)?;
+        if !owner_weight_within_cap(&env, new_weight, resulting_total) {
+            return Err(ContractError::SingleOwnerWeightCapExceeded);
+        }
+
+        if description.is_empty() {
+            return Err(ContractError::EmptyDescription);
+        }
+        if description.len() > MAX_DESCRIPTION_LEN {
+            return Err(ContractError::DescriptionTooLong);
+        }
+
+        let now = env.ledger().timestamp();
+        if deadline <= now {
+            return Err(ContractError::InvalidDeadline);
+        }
+        if deadline - now > MAX_PROPOSAL_DURATION {
+            return Err(ContractError::InvalidDuration);
+        }
+
+        let active = read_active_count(&env);
+        if active >= MAX_ACTIVE_PROPOSALS {
+            return Err(ContractError::TooManyActiveProposals);
+        }
+
+        let threshold = read_threshold(&env)?;
+        let id = read_next_id(&env);
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
+
+        let proposal = Proposal {
+            id,
+            proposer: proposer.clone(),
+            description,
+            deadline,
+            approvals: 0,
+            status: ProposalStatus::Pending,
+            kind: ProposalKind::ChangeOwnerWeight(target_owner, new_weight),
+            ready_at: 0,
+            quorum_weight: threshold,
+            category: ProposalCategory::Other,
+        };
+        write_proposal(&env, &proposal);
+        write_active_count(&env, active + 1);
+
+        env.events().publish(
+            (symbol_short!("created"),),
+            ProposalCreatedEvent {
+                id,
+                proposer,
+                threshold,
+                category: ProposalCategory::Other,
+                transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: current_total,
             },
         );
 
@@ -853,24 +1113,26 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
+        let owners = read_owners_map(&env)?;
         let threshold = read_threshold(&env)?;
 
-        let mut found = false;
-        for owner in owners.iter() {
-            if owner == owner_to_remove {
-                found = true;
-                break;
-            }
-        }
-        if !found {
+        if !owners.contains_key(owner_to_remove.clone()) {
             return Err(ContractError::OwnerNotFound);
         }
 
-        if owners.len() <= threshold {
+        // Guard: removing this owner must not make the threshold unachievable.
+        // With the absolute-weight model the correct check is whether the
+        // remaining total weight would still be >= threshold.
+        let mut owners = read_owners_map(&env)?;
+        let removed_weight = owners.get(owner_to_remove.clone()).ok_or(ContractError::OwnerNotFound)?;
+        let total_weight = read_total_weight(&env);
+        let remaining_weight = total_weight
+            .checked_sub(removed_weight)
+            .ok_or(ContractError::ArithmeticError)?;
+        if remaining_weight < threshold {
             return Err(ContractError::WouldBreakThreshold);
         }
 
@@ -913,6 +1175,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -921,6 +1184,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -940,12 +1205,16 @@ impl AccordContract {
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
-        require_owner(&env, &proposer)?;
+        require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        let owners = read_owners(&env)?;
+        let total_weight = read_total_weight(&env);
 
         if new_threshold == 0 || new_threshold > read_total_weight(&env) {
+        // The threshold is an absolute weight value. Validate it against the
+        // current total weight so the proposed threshold is always achievable
+        // given the current weight distribution.
+        if new_threshold == 0 || new_threshold > total_weight {
             return Err(ContractError::InvalidThreshold);
         }
 
@@ -989,6 +1258,7 @@ impl AccordContract {
         write_proposal(&env, &proposal);
         write_active_count(&env, active + 1);
 
+        let total_weight = read_total_weight(&env);
         env.events().publish(
             (symbol_short!("created"),),
             ProposalCreatedEvent {
@@ -997,6 +1267,8 @@ impl AccordContract {
                 threshold,
                 category: ProposalCategory::Other,
                 transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
             },
         );
 
@@ -1009,8 +1281,7 @@ impl AccordContract {
     /// Records `ready_at` the first time the threshold is crossed.
     pub fn approve(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        require_owner(&env, &approver)?;
-
+        let weight = require_owner_and_weight(&env, &approver)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         // Refresh derived status so an already-expired proposal is caught here.
@@ -1029,7 +1300,7 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, true);
 
-        let weight = read_owner_weight(&env, &approver);
+        
         proposal.approvals = proposal
             .approvals
             .checked_add(weight)
@@ -1064,8 +1335,7 @@ impl AccordContract {
     /// threshold the status transitions back to `Pending`.
     pub fn revoke(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        require_owner(&env, &approver)?;
-
+        let weight = require_owner_and_weight(&env, &approver)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         proposal.status = derive_status(&env, &proposal);
@@ -1083,7 +1353,7 @@ impl AccordContract {
 
         write_approval(&env, proposal_id, &approver, false);
 
-        let weight = read_owner_weight(&env, &approver);
+        
         proposal.approvals = proposal
             .approvals
             .checked_sub(weight)
@@ -1113,7 +1383,7 @@ impl AccordContract {
     /// has elapsed.
     pub fn execute(env: Env, executor: Address, proposal_id: u64) -> Result<(), ContractError> {
         executor.require_auth();
-        require_owner(&env, &executor)?;
+        require_owner_and_weight(&env, &executor)?;
         require_not_frozen(&env)?;
 
         let mut proposal = read_proposal(&env, proposal_id)?;
@@ -1151,33 +1421,92 @@ impl AccordContract {
             ProposalKind::Transfer(transfers) => {
                 for transfer in transfers.iter() {
                     if token::Client::new(&env, &transfer.token)
-                        .try_transfer(&env.current_contract_address(), &transfer.to, &transfer.amount)
+                        .try_transfer(
+                            &env.current_contract_address(),
+                            &transfer.to,
+                            &transfer.amount,
+                        )
                         .is_err()
                     {
                         return Err(ContractError::TransferFailed);
                     }
                 }
+                // Track cumulative spending per token for the proposer.
+                let proposer = proposal.proposer.clone();
+                let mut tracked_tokens: Vec<Address> = Vec::new(&env);
+                let mut tracked_amounts: Vec<i128> = Vec::new(&env);
+                for transfer in transfers.iter() {
+                    let mut found = false;
+                    for j in 0..tracked_tokens.len() {
+                        if tracked_tokens.get(j).unwrap() == transfer.token {
+                            let total = tracked_amounts
+                                .get(j)
+                                .unwrap()
+                                .checked_add(transfer.amount)
+                                .ok_or(ContractError::ArithmeticError)?;
+                            tracked_amounts.set(j, total);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found {
+                        tracked_tokens.push_back(transfer.token.clone());
+                        tracked_amounts.push_back(transfer.amount);
+                    }
+                }
+                let now = env.ledger().timestamp();
+                for j in 0..tracked_tokens.len() {
+                    let token = tracked_tokens.get(j).unwrap();
+                    let amount = tracked_amounts.get(j).unwrap();
+                    let tracker = read_spent_tracker(&env, &proposer, &token);
+                    let epoch = if tracker.epoch == 0 {
+                        now
+                    } else {
+                        tracker.epoch
+                    };
+                    let spent = if now > epoch.saturating_add(SPENDING_WINDOW) {
+                        amount
+                    } else {
+                        tracker
+                            .spent
+                            .checked_add(amount)
+                            .ok_or(ContractError::ArithmeticError)?
+                    };
+                    write_spent_tracker(&env, &proposer, &token, &SpentTracker { spent, epoch });
+                }
             }
             ProposalKind::AddOwner(new_owner) => {
-                let mut owners = read_owners(&env)?;
-                owners.push_back(new_owner.clone());
+                let mut owners = read_owners_map(&env)?;
+                let prev_count = owners.len();
+                owners.set(new_owner.clone(), MIN_OWNER_WEIGHT);
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
+                // New owners start at MIN_OWNER_WEIGHT; keep the counter in
+                // lockstep with the implicit default returned by read_owner_weight.
+                write_total_weight(
+                    &env,
+                    read_total_weight(&env)
+                        .checked_add(MIN_OWNER_WEIGHT)
+                        .ok_or(ContractError::ArithmeticError)?,
+                );
+                env.events().publish(
+                    (symbol_short!("a_own"),),
+                    AddOwnerExecutedEvent {
+                        new_owner: new_owner.clone(),
+                        owner_count: prev_count + 1,
+                    },
+                );
             }
             ProposalKind::RemoveOwner(owner_to_remove) => {
-                let owners = read_owners(&env)?;
-                let mut new_owners = Vec::new(&env);
-                for owner in owners.iter() {
-                    if owner != *owner_to_remove {
-                        new_owners.push_back(owner);
-                    }
-                }
+                let mut owners = read_owners_map(&env)?;
+                let prev_count = owners.len();
+                let weight = owners.get(owner_to_remove.clone()).unwrap_or(0);
+                owners.remove(owner_to_remove.clone());
                 let key = owners_key();
-                env.storage().persistent().set(&key, &new_owners);
+                env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
 
-                let weight = read_owner_weight(&env, owner_to_remove);
                 let current_total = read_total_weight(&env);
                 write_total_weight(
                     &env,
@@ -1185,18 +1514,93 @@ impl AccordContract {
                         .checked_sub(weight)
                         .ok_or(ContractError::ArithmeticError)?,
                 );
-                env.storage()
-                    .persistent()
-                    .remove(&owner_weight_key(owner_to_remove));
+
+                env.events().publish(
+                    (symbol_short!("r_own"),),
+                    RemoveOwnerExecutedEvent {
+                        removed_owner: owner_to_remove.clone(),
+                        owner_count: prev_count - 1,
+                    },
+                );
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
+                let old_threshold = env
+                    .storage()
+                    .instance()
+                    .get::<_, u32>(&threshold_key())
+                    .unwrap_or(0);
                 env.storage()
                     .instance()
                     .set(&threshold_key(), new_threshold);
                 bump_instance(&env);
+                env.events().publish(
+                    (symbol_short!("c_thr"),),
+                    ChangeThresholdExecutedEvent {
+                        previous_threshold: old_threshold,
+                        new_threshold: *new_threshold,
+                    },
+                );
             }
             ProposalKind::SetSpendingLimit(owner, token, limit) => {
+                let prev_limit = read_spending_limit(&env, owner, token);
                 write_spending_limit(&env, owner, token, *limit);
+                // Reset cumulative spending tracking when a new limit is set.
+                let now = env.ledger().timestamp();
+                write_spent_tracker(
+                    &env,
+                    owner,
+                    token,
+                    &SpentTracker {
+                        spent: 0,
+                        epoch: now,
+                    },
+                );
+                env.events().publish(
+                    (symbol_short!("s_lim"),),
+                    SetSpendingLimitExecutedEvent {
+                        owner: owner.clone(),
+                        token: token.clone(),
+                        previous_limit: prev_limit,
+                        new_limit: *limit,
+                    },
+                );
+            }
+            ProposalKind::ChangeOwnerWeight(target_owner, new_weight) => {
+                if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(new_weight) {
+                    return Err(ContractError::InvalidWeight);
+                }
+                let mut owners = read_owners_map(&env)?;
+                let old_weight = owners
+                    .get(target_owner.clone())
+                    .ok_or(ContractError::TargetOwnerNoLongerExists)?;
+                let current_total = read_total_weight(&env);
+                let new_total = current_total
+                    .checked_sub(old_weight)
+                    .ok_or(ContractError::ArithmeticError)?
+                    .checked_add(*new_weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+
+                if !owner_weight_within_cap(&env, *new_weight, new_total) {
+                    return Err(ContractError::SingleOwnerWeightCapExceeded);
+                }
+
+                // Invariant: ensure no active (Pending/Ready) proposal would
+                // become un-quorumable (quorum_weight > new_total_weight).
+                let next_id = read_next_id(&env);
+                for id in 1..next_id {
+                    if let Ok(active_proposal) = read_proposal(&env, id) {
+                        let status = derive_status(&env, &active_proposal);
+                        if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && active_proposal.quorum_weight > new_total
+                        {
+                            return Err(ContractError::WouldBreakThreshold);
+                        }
+                    }
+                }
+
+                owners.set(target_owner.clone(), *new_weight);
+                env.storage().persistent().set(&owners_key(), &owners);
+                write_total_weight(&env, new_total);
             }
         }
 
@@ -1234,7 +1638,7 @@ impl AccordContract {
     /// Returns the number of proposals actually swept.
     pub fn cancel_expired(env: Env, caller: Address, ids: Vec<u64>) -> Result<u32, ContractError> {
         caller.require_auth();
-        require_owner(&env, &caller)?;
+        require_owner_and_weight(&env, &caller)?;
 
         let mut swept: u32 = 0;
 
@@ -1265,11 +1669,11 @@ impl AccordContract {
     /// (i.e. approved and not subsequently revoked). Errors if the contract is
     /// not initialized or the proposal does not exist.
     pub fn get_approvers(env: Env, proposal_id: u64) -> Result<Vec<Address>, ContractError> {
-        let owners = read_owners(&env)?;
+        let owners = read_owners_map(&env)?;
         read_proposal(&env, proposal_id)?;
 
         let mut approvers = Vec::new(&env);
-        for owner in owners.iter() {
+        for owner in owners.keys().iter() {
             if read_approval(&env, proposal_id, &owner) {
                 approvers.push_back(owner);
             }
@@ -1285,6 +1689,39 @@ impl AccordContract {
 
     pub fn get_total_weight(env: Env) -> u32 {
         read_total_weight(&env)
+    }
+
+    /// Returns a current owner's voting weight, or `OwnerNotFound` otherwise.
+    pub fn get_owner_weight(env: Env, owner: Address) -> Result<u32, ContractError> {
+        let owners = read_owners_map(&env)?;
+        owners.get(owner).ok_or(ContractError::OwnerNotFound)
+    }
+
+    /// Returns the configured maximum percentage of total weight that one owner
+    /// may receive through a ChangeOwnerWeight proposal.
+    pub fn get_max_single_owner_weight_pct(env: Env) -> u32 {
+        read_max_single_owner_weight_pct(&env)
+    }
+
+    /// Updates the maximum single-owner weight percentage (1..=50). The same
+    /// weighted, distinct-owner quorum required for other sensitive operations
+    /// authorizes this parameter change.
+    pub fn set_max_single_owner_weight_pct(
+        env: Env,
+        approvers: Vec<Address>,
+        max_pct: u32,
+    ) -> Result<(), ContractError> {
+        // The parameter may be tightened, but never relaxed above 50%: a
+        // higher cap would allow a weight change to grant a strict majority.
+        if max_pct == 0 || max_pct > MAX_SINGLE_OWNER_WEIGHT_PCT {
+            return Err(ContractError::InvalidWeight);
+        }
+        require_weighted_approvers(&env, &approvers)?;
+        env.storage()
+            .instance()
+            .set(&max_single_owner_weight_pct_key(), &max_pct);
+        bump_instance(&env);
+        Ok(())
     }
 
     /// Returns the current state of a proposal with a derived status.
@@ -1316,7 +1753,7 @@ impl AccordContract {
 
     /// Returns all current owners.
     pub fn get_owners(env: Env) -> Result<Vec<Address>, ContractError> {
-        read_owners(&env)
+        Ok(read_owners_map(&env)?.keys())
     }
 
     /// Returns the spending limit for an (owner, token) pair, or `None` if no
@@ -1325,8 +1762,22 @@ impl AccordContract {
         read_spending_limit(&env, &owner, &token)
     }
 
+    /// Returns the remaining spending limit (limit minus cumulative spent within
+    /// the current window) for an `(owner, token)` pair. Returns `None` if no
+    /// limit is set (the owner is unrestricted for that token).
+    pub fn get_remaining_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
+        let limit = read_spending_limit(&env, &owner, &token)?;
+        let spent = effective_spent(&env, &owner, &token);
+        Some(limit.saturating_sub(spent))
+    }
+
     /// Returns the current approval threshold.
     pub fn get_threshold(env: Env) -> Result<u32, ContractError> {
+        read_threshold(&env)
+    }
+
+    /// Returns the quorum weight a newly created proposal would currently be assigned.
+    pub fn get_required_quorum_weight(env: Env) -> Result<u32, ContractError> {
         read_threshold(&env)
     }
 
@@ -1342,7 +1793,7 @@ impl AccordContract {
 
     /// Returns whether `address` is a current owner.
     pub fn is_owner(env: Env, address: Address) -> bool {
-        require_owner(&env, &address).is_ok()
+        require_owner_and_weight(&env, &address).is_ok()
     }
 
     /// Returns whether `owner` has approved `proposal_id`.
@@ -1350,11 +1801,25 @@ impl AccordContract {
         read_approval(&env, proposal_id, &owner)
     }
 
+    /// Returns the current approval progress for a proposal: the cumulative
+    /// approval weight, the required quorum weight, and the total weight of
+    /// all owners.
+    pub fn get_proposal_approval_progress(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<ProposalApprovalProgress, ContractError> {
+        let proposal = read_proposal(&env, proposal_id)?;
+        Ok(ProposalApprovalProgress {
+            approval_weight: proposal.approvals,
+            quorum_weight: proposal.quorum_weight,
+            total_weight: read_total_weight(&env),
+        })
+    }
+
     // ─── Guardian ─────────────────────────────────────────────────────────────
 
-    /// Assigns or replaces the guardian address. Requires at least `threshold`
-    /// distinct owners in `approvers` to co-sign, preventing any single owner
-    /// from installing a guardian unilaterally.
+    /// Assigns or replaces the guardian address. Requires distinct registered
+    /// owners whose combined weight reaches `threshold`.
     pub fn set_guardian(
         env: Env,
         approvers: Vec<Address>,
@@ -1382,6 +1847,7 @@ impl AccordContract {
         if cumulative_weight < threshold {
             return Err(ContractError::ThresholdNotMet);
         }
+        require_weighted_approvers(&env, &approvers)?;
 
         write_guardian(&env, &new_guardian);
 
@@ -1413,9 +1879,8 @@ impl AccordContract {
         Ok(())
     }
 
-    /// Resumes normal operation after a freeze. Requires at least `threshold`
-    /// distinct owners in `approvers` to co-sign, so no individual can thaw a
-    /// frozen contract alone.
+    /// Resumes normal operation after a freeze. Requires distinct registered
+    /// owners whose combined weight reaches `threshold`.
     pub fn unfreeze(env: Env, approvers: Vec<Address>) -> Result<(), ContractError> {
         let threshold = read_threshold(&env)?;
 
@@ -1439,6 +1904,7 @@ impl AccordContract {
         if cumulative_weight < threshold {
             return Err(ContractError::ThresholdNotMet);
         }
+        require_weighted_approvers(&env, &approvers)?;
 
         write_frozen(&env, false);
 
@@ -1465,12 +1931,12 @@ impl AccordContract {
     // ─── Upgrade ─────────────────────────────────────────────────────────────
 
     /// Replaces the contract WASM in-place. Keeps all storage (owners, proposals, approvals).
-    /// Requires at least `threshold` distinct registered owners to co-sign the upgrade
-    /// off-chain and be listed in `approvers`. Every address in `approvers` must call
-    /// `require_auth()`, must be a registered owner, and must appear only once.
+    /// Requires distinct registered owners whose combined weight reaches
+    /// `threshold` to co-sign the upgrade. Every address in `approvers` must call
+    /// `require_auth()`, be a registered owner, and appear only once.
     ///
     /// # Arguments
-    /// * `approvers` - List of owner addresses co-signing the upgrade (minimum: threshold).
+    /// * `approvers` - Distinct owner addresses co-signing the upgrade with combined weight at least threshold.
     /// * `new_wasm_hash` - The SHA-256 hash of the new contract WASM to deploy.
     pub fn upgrade(
         env: Env,
@@ -1501,6 +1967,7 @@ impl AccordContract {
         if cumulative_weight < threshold {
             return Err(ContractError::ThresholdNotMet);
         }
+        require_weighted_approvers(&env, &approvers)?;
 
         let caller = approvers.get(0).unwrap();
         env.deployer()
@@ -1516,6 +1983,7 @@ impl AccordContract {
 
         Ok(())
     }
+
 }
 
 mod test;

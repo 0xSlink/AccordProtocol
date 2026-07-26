@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
   Route,
@@ -125,8 +125,12 @@ export default function App() {
     };
   }, [lastSuccessAt]);
 
-  const activeProposals = proposals.filter((proposal) =>
-    ["pending", "ready"].includes(proposal.status),
+  const activeProposals = useMemo(
+    () =>
+      proposals.filter((proposal) =>
+        ["pending", "ready"].includes(proposal.status),
+      ),
+    [proposals]
   );
   const isOwner = Boolean(
     wallet.address && ownerAddresses.includes(wallet.address),
@@ -135,33 +139,38 @@ export default function App() {
     wallet.address && !loading && !error && !isOwner,
   );
 
-  async function withTx(
-    fn: () => Promise<void>,
-    optimisticPatch?: OptimisticPatch
-  ) {
-    if (!wallet.address) {
-      await wallet.connect();
-      return;
-    }
+  const { address, connect } = wallet;
 
-    setTxError(null);
-    setTxPending(true);
+  const withTx = useCallback(
+    async (
+      fn: () => Promise<void>,
+      optimisticPatch?: OptimisticPatch
+    ) => {
+      if (!address) {
+        await connect();
+        return;
+      }
 
-    if (optimisticPatch) {
-      optimisticUpdate(optimisticPatch.id, optimisticPatch.patch);
-    }
+      setTxError(null);
+      setTxPending(true);
 
-    try {
-      await fn();
-      refresh();
-    } catch (err) {
-      setTxError(err instanceof Error ? err.message : "Transaction failed");
-    } finally {
-      setTxPending(false);
-    }
-  }
+      if (optimisticPatch) {
+        optimisticUpdate(optimisticPatch.id, optimisticPatch.patch);
+      }
 
-  const handleApprove = (id: number) => {
+      try {
+        await fn();
+        refresh();
+      } catch (err) {
+        setTxError(err instanceof Error ? err.message : "Transaction failed");
+      } finally {
+        setTxPending(false);
+      }
+    },
+    [address, connect, optimisticUpdate, refresh]
+  );
+
+  const handleApprove = useCallback((id: number) => {
     const proposal = proposals.find((candidate) => candidate.id === id);
     if (!proposal) {
       return withTx(() => approveProposal(wallet.address!, id));
@@ -178,15 +187,15 @@ export default function App() {
         userHasApproved: true,
       },
     });
-  };
+  }, [proposals, wallet.address, withTx]);
 
-  const handleExecute = (id: number) =>
+  const handleExecute = useCallback((id: number) =>
     withTx(() => executeProposal(wallet.address!, id), {
       id,
       patch: { status: "executed" },
-    });
+    }), [wallet.address, withTx]);
 
-  const handleRevoke = (id: number) => {
+  const handleRevoke = useCallback((id: number) => {
     const proposal = proposals.find((candidate) => candidate.id === id);
     if (!proposal) {
       return withTx(() => revokeProposal(wallet.address!, id));
@@ -206,7 +215,7 @@ export default function App() {
         userHasApproved: false,
       },
     });
-  };
+  }, [proposals, wallet.address, withTx]);
 
   const thresholdStat = stats.find((stat) => stat.label === "Threshold");
   const threshold = Number.parseInt(

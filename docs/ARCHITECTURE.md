@@ -1,7 +1,7 @@
 # Accord Protocol — Architecture
 
 ## 1. System Overview
-
+ 
 ```text
 ┌──────────────────────────────┐
 │     Web Client (Vite/React)  │
@@ -425,3 +425,8 @@ Frontend utilities should live in `frontend/src/lib/soroban.ts`:
 | [docs/guides/reading-the-dashboard.md](guides/reading-the-dashboard.md)   | End-user guide: proposal list, status badges, and approval bar |
 | [CONTRACT_API.md](CONTRACT_API.md)                                        | Full contract function reference                               |
 | [SETUP.md](SETUP.md)                                                      | Developer setup and deployment instructions                    |
+
+## Security Note: Governance Controls vs Spending Limits
+
+**Spending limits and voting weights are strictly independent.**
+An owner's voting weight controls their governance power (e.g. approving proposals), while their spending limit controls the maximum token amount they can propose to transfer. Changing an owner's voting weight does not affect their spending limits, and vice versa. They are managed by completely separate storage keys and governance proposals.
