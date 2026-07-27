@@ -568,6 +568,7 @@ fn remove_owner_rejected_at_creation_if_breaks_other_pending_proposal_quorum() {
     let recipient = Address::generate(&env);
 
     let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let token_client = token::Client::new(&env, &token_id.address());
     let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
     let contract_id = env.register(AccordContract, ());
     let client = AccordContractClient::new(&env, &contract_id);
