@@ -325,6 +325,95 @@ fn initialize_accepts_matching_owners_and_weights_length() {
     assert_eq!(client.get_owners().len(), 3);
 }
 
+// ─── Initialize: Owner Weight Bounds Validation (issue #305) ───────────────
+
+/// A supplied owner weight of zero must be rejected, and the rejection must
+/// not leave the contract partially initialized — a subsequent call with an
+/// in-bounds weight still succeeds rather than failing with
+/// `AlreadyInitialized`.
+#[test]
+fn initialize_rejects_owner_weight_of_zero_and_leaves_uninitialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut zero_weight = Vec::new(&env);
+    zero_weight.push_back(1_u32);
+    zero_weight.push_back(0_u32);
+
+    assert_eq!(
+        client.try_initialize(&owners, &zero_weight, &1, &0),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+    client.initialize(&owners, &weights, &1, &0);
+    assert_eq!(client.get_owners().len(), 2);
+}
+
+/// A supplied owner weight above `MAX_OWNER_WEIGHT` must be rejected with
+/// the same error as a weight of zero.
+#[test]
+fn initialize_rejects_owner_weight_above_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1_u32);
+    weights.push_back(MAX_OWNER_WEIGHT + 1);
+
+    assert_eq!(
+        client.try_initialize(&owners, &weights, &1, &0),
+        Err(Ok(ContractError::InvalidWeight))
+    );
+}
+
+/// Baseline boundary check alongside the two rejection tests above: weights
+/// exactly at `MIN_OWNER_WEIGHT` and exactly at `MAX_OWNER_WEIGHT` are both
+/// accepted.
+#[test]
+fn initialize_accepts_owner_weights_at_min_and_max_bounds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(MIN_OWNER_WEIGHT);
+    weights.push_back(MAX_OWNER_WEIGHT);
+
+    client.initialize(&owners, &weights, &1, &0);
+    assert_eq!(
+        client.get_owner_weight(&owners.get(0).unwrap()),
+        MIN_OWNER_WEIGHT
+    );
+    assert_eq!(
+        client.get_owner_weight(&owners.get(1).unwrap()),
+        MAX_OWNER_WEIGHT
+    );
+    assert_eq!(
+        client.get_total_weight(),
+        MIN_OWNER_WEIGHT + MAX_OWNER_WEIGHT
+    );
+}
+
 // ─── Absolute-weight quorum model ────────────────────────────────────────────
 
 /// The threshold is an absolute weight value, not a count of owners. Validate
