@@ -3814,6 +3814,98 @@ fn test_proposal_created_event_snapshots_weights() {
     assert_eq!(event.total_weight_at_creation, 3, "historical total_weight_at_creation must be unchanged after owner removal");
 }
 
+/// A proposal's snapshotted `quorum_weight` and `total_weight_at_creation` are
+/// meant to be permanent — set once at creation and never retroactively
+/// altered by other proposals that change `TOTAL_WEIGHT` while this proposal
+/// is still `Pending`. Covers two different kinds of intervening proposals
+/// (a weight change and an owner addition) to confirm the snapshot holds
+/// regardless of what kind of change happens around it, and confirms the
+/// proposal's status keeps being evaluated against its own original
+/// `quorum_weight` rather than the now-changed live total weight (issue #303).
+#[test]
+fn proposal_snapshot_unaffected_by_concurrent_weight_and_owner_changes() {
+    // 3 owners each with weight 1, threshold 2 → total_weight = 3.
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let recipient = Address::generate(&env);
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Snapshot invariance test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Capture the snapshot immediately after creation, before anything else runs.
+    // Event capture must happen before any other client call, since the mock
+    // event log only retains events from the most recent invocation.
+    let all_events = env.events().all();
+    let contract_events = all_events.filter_by_contract(&client.address);
+    let event_data = match &contract_events.events().first().unwrap().body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let created_event: ProposalCreatedEvent = event_data.into_val(&env);
+    let original_quorum_weight = client.get_proposal(&id).quorum_weight;
+    assert_eq!(original_quorum_weight, 2);
+    assert_eq!(created_event.total_weight_at_creation, 3);
+
+    // owner_a approves — 1 of 2 required weight. Proposal stays Pending while
+    // the intervening proposals below run.
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Intervening proposal #1: a weight change. owner_b's weight goes from 1
+    // to 2 (exactly the 50% single-owner cap of the resulting total of 4),
+    // moving TOTAL_WEIGHT from 3 to 4.
+    let weight_change_id = client.create_change_weight_proposal(
+        &owner_a,
+        &owner_b,
+        &2,
+        &str(&env, "Bump owner_b weight"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &weight_change_id);
+    client.approve(&owner_b, &weight_change_id);
+    client.execute(&owner_b, &weight_change_id);
+    assert_eq!(client.get_total_weight(), 4, "total weight after weight change should be 4");
+
+    // Intervening proposal #2: an owner addition. Adds owner_d with the
+    // default starting weight, moving TOTAL_WEIGHT from 4 to 5.
+    let owner_d = Address::generate(&env);
+    let add_owner_id = client.create_add_owner_proposal(
+        &owner_a,
+        &owner_d,
+        &str(&env, "Add owner_d"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_owner_id);
+    client.approve(&owner_b, &add_owner_id);
+    client.execute(&owner_b, &add_owner_id);
+    assert_eq!(client.get_total_weight(), 5, "total weight after owner addition should be 5");
+
+    // The original proposal is still Pending throughout — re-read it now that
+    // TOTAL_WEIGHT has drifted from 3 to 5 via two different kinds of
+    // intervening proposals, and confirm its snapshot is untouched.
+    let refreshed = client.get_proposal(&id);
+    assert_eq!(
+        refreshed.quorum_weight, original_quorum_weight,
+        "quorum_weight must remain the value snapshotted at creation, not drift with TOTAL_WEIGHT"
+    );
+    assert_eq!(created_event.total_weight_at_creation, 3, "total_weight_at_creation must remain the value snapshotted at creation");
+    assert_eq!(refreshed.status, ProposalStatus::Pending);
+
+    // owner_c approves — cumulative weight now 1 (owner_a) + 1 (owner_c) = 2,
+    // which reaches the ORIGINAL quorum_weight of 2. If status were instead
+    // evaluated against the current total_weight of 5, this could not become
+    // Ready with only 2 approval-weight.
+    client.approve(&owner_c, &id);
+    assert_eq!(
+        client.get_proposal(&id).status,
+        ProposalStatus::Ready,
+        "status must be evaluated against the original quorum_weight snapshot, not the current total weight"
+    );
+}
+
 proptest! {
     // Soroban builds a fresh Env per case, so keep the case count modest.
     #![proptest_config(ProptestConfig::with_cases(32))]
