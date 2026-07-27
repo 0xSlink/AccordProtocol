@@ -115,6 +115,14 @@ Accord uses two patterns:
 
 Tuples are preferred over concatenated strings because Soroban hashes the entire key structure natively — string concatenation would require heap allocation and introduces ambiguity (`"PROP1"` vs `"PRO" + "P1"` are indistinguishable as strings, but distinct as tuples). Tuple keys are zero-copy, structurally unambiguous, and compose cleanly with Soroban's type-safe storage API.
 
+### Lifecycle of Per-Owner Persistent Storage Entries
+
+When an owner is removed from governance via `RemoveOwner`, the execution logic updates the `OWNERS` map and `TWEIGHT` (total weight) in storage. Per-owner persistent storage entries indexed by `Address` are not automatically swept or deleted upon owner removal:
+
+- **Per-Proposal Approval Entries (`("APPR", id, owner)`)**: Persistent approval entries for removed owners remain in ledger storage. Calling `has_approved(proposal_id, address)` directly reads `APPR` and returns `true` for an approval recorded prior to removal. High-level view functions like `get_approvers(proposal_id)` iterate only currently registered owners in `OWNERS`, automatically excluding removed addresses from the active approvers list.
+- **Spending Limit & Tracker Entries (`("SLIMIT", owner, token)` and `("SPENT", owner, token)`)**: Persistent spending limit bounds and tracking epochs are stored per `(owner, token)` pair and are not erased when an owner is removed.
+- **Re-added Owner Inheritance**: If an address is removed and later re-added as an owner via `AddOwner`, any pre-existing `SLIMIT` and `SPENT` entries associated with that address remain active in storage. The re-added owner immediately inherits those previous spending limits unless a new `SetSpendingLimit` proposal is created and executed to update or clear the limit.
+
 ### Storage Cost Per Proposal
 
 Each proposal creates a fixed number of persistent ledger entries:

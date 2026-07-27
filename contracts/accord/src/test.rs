@@ -6643,5 +6643,110 @@ fn active_count_lazy_prunes_expired_proposals_without_explicit_sweep() {
     );
 }
 
+#[test]
+fn removed_owner_stale_approval_entry_behavior() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // owner_a creates proposal #1
+    let prop_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000, &token_client.address),
+        &str(&env, "Test proposal"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // owner_b approves proposal #1
+    client.approve(&owner_b, &prop_id);
+    assert!(client.has_approved(&prop_id, &owner_b));
+    let approvers_before = client.get_approvers(&prop_id);
+    assert!(approvers_before.contains(&owner_b));
+
+    // Remove owner_b via RemoveOwner proposal
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_a, &remove_id);
+
+    assert!(!client.is_owner(&owner_b));
+
+    // Stale APPR entry remains in persistent storage, so has_approved returns true
+    assert!(client.has_approved(&prop_id, &owner_b));
+
+    // get_approvers filters by active owners, so owner_b is excluded from current approvers list
+    let approvers_after = client.get_approvers(&prop_id);
+    assert!(!approvers_after.contains(&owner_b));
+}
+
+#[test]
+fn removed_then_readded_owner_inherits_stale_spending_limit() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let limit_amount: i128 = 500_000;
+
+    // 1. Set spending limit for owner_b
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_b,
+        &token_client.address,
+        &limit_amount,
+        &str(&env, "Set spending limit for owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_c, &limit_id);
+    client.execute(&owner_a, &limit_id);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+
+    // 2. Remove owner_b via RemoveOwner
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_a, &remove_id);
+
+    assert!(!client.is_owner(&owner_b));
+
+    // Persistent SLIMIT entry is not purged on removal
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+
+    // 3. Re-add owner_b via AddOwner
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Re-add owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_c, &add_id);
+    client.execute(&owner_a, &add_id);
+
+    assert!(client.is_owner(&owner_b));
+
+    // The re-added owner immediately inherits the stale spending limit entry
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+}
+
+
 
 
