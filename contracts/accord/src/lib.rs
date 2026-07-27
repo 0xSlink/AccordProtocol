@@ -233,10 +233,13 @@ pub enum ContractError {
     NoGuardian = 27,
     SpendingLimitExceeded = 28,
     InvalidWeight = 29,
-    InvalidWeightsLength = 30,
-    SingleOwnerWeightCapExceeded = 31,
-    TargetOwnerNoLongerExists = 32,
-    AlreadyMigrated = 33,
+    /// An owner weight is below the minimum allowed value (`MIN_OWNER_WEIGHT`).
+    /// Zero is never a valid weight; use `RemoveOwner` instead.
+    WeightBelowMinimum = 30,
+    InvalidWeightsLength = 31,
+    SingleOwnerWeightCapExceeded = 32,
+    TargetOwnerNoLongerExists = 33,
+    AlreadyMigrated = 34,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -720,7 +723,10 @@ impl AccordContract {
         for i in 0..owners.len() {
             let owner = owners.get(i).unwrap();
             let weight = weights.get(i).unwrap();
-            if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&weight) {
+            if weight < MIN_OWNER_WEIGHT {
+                return Err(ContractError::WeightBelowMinimum);
+            }
+            if weight > MAX_OWNER_WEIGHT {
                 return Err(ContractError::InvalidWeight);
             }
             owner.require_auth();
@@ -1154,7 +1160,10 @@ impl AccordContract {
         require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
 
-        if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&new_weight) {
+        if new_weight < MIN_OWNER_WEIGHT {
+            return Err(ContractError::WeightBelowMinimum);
+        }
+        if new_weight > MAX_OWNER_WEIGHT {
             return Err(ContractError::InvalidWeight);
         }
 
@@ -1697,7 +1706,10 @@ impl AccordContract {
                 );
             }
             ProposalKind::ChangeOwnerWeight(target_owner, new_weight) => {
-                if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(new_weight) {
+                if *new_weight < MIN_OWNER_WEIGHT {
+                    return Err(ContractError::WeightBelowMinimum);
+                }
+                if *new_weight > MAX_OWNER_WEIGHT {
                     return Err(ContractError::InvalidWeight);
                 }
                 let mut owners = read_owners_map(&env)?;
