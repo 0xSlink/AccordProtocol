@@ -23,6 +23,10 @@ vi.mock("../lib/contract", () => ({
     "GBPLX2P3VWYKPQ7L5RI5OGXQ6T4G7QZMJ3HPQD7FZX5KJ3H2Z4YK5ABC",
   ]),
   getThreshold: vi.fn().mockResolvedValue(2),
+  getRequiredQuorumWeight: vi.fn().mockResolvedValue(2),
+  getOwnerWeight: vi.fn().mockResolvedValue(1),
+  getWeightCapPct: vi.fn().mockResolvedValue(50),
+  getTotalWeight: vi.fn().mockResolvedValue(2),
 }));
 
 // Mock StrKey to avoid validation issues with dummy addresses

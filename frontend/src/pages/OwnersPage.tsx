@@ -4,6 +4,30 @@ import { createSpendingLimitProposal } from "../lib/submit";
 import { displayToStroops, stroopsToDisplay } from "../lib/soroban";
 import { StrKey } from "@stellar/stellar-sdk";
 import type { Owner } from "../types/accord";
+import { useOwnerWeights } from "../hooks/useOwnerWeights";
+
+const CHART_COLORS = [
+  "bg-emerald-500",
+  "bg-blue-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-indigo-500",
+  "bg-violet-500",
+  "bg-orange-500",
+  "bg-cyan-500",
+  "bg-fuchsia-500",
+  "bg-teal-500",
+  "bg-purple-500",
+  "bg-pink-500",
+  "bg-lime-500",
+  "bg-red-400",
+  "bg-purple-400",
+  "bg-sky-500",
+  "bg-emerald-400",
+  "bg-amber-400",
+  "bg-rose-400",
+  "bg-indigo-400",
+];
 
 const TOKEN_ADDRESSES: Record<string, string> = {
   XLM: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
@@ -32,6 +56,7 @@ export function OwnersPage({
   walletAddress,
   onProposalSubmitted,
 }: OwnersPageProps) {
+  const { weights, totalWeight, loading: weightsLoading } = useOwnerWeights(ownerAddresses);
   const [spendingLimits, setSpendingLimits] = useState<SpendingLimitMap>({});
   const [limitsLoading, setLimitsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -148,6 +173,57 @@ export function OwnersPage({
         </p>
       </div>
 
+      {/* Weight Distribution Chart */}
+      <div className="mb-8 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+        <h2 className="text-sm font-medium text-zinc-400 mb-3">Voting Weight Distribution</h2>
+        {weightsLoading ? (
+          <div className="h-6 bg-zinc-800 animate-pulse rounded-lg w-full" />
+        ) : ownerAddresses.length === 0 ? (
+          <div className="h-6 bg-zinc-850 rounded-lg flex items-center justify-center text-xs text-zinc-500">
+            No voting power registered.
+          </div>
+        ) : (
+          <div>
+            <div className="flex h-6 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 w-full mb-3">
+              {ownerAddresses.map((addr, idx) => {
+                const weight = weights[addr] ?? 1;
+                const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
+                const ownerInfo = owners.find((o) => o.address === addr) || { label: `Signer ${idx + 1}`, address: addr };
+                const labelText = `${ownerInfo.label} (${addr.slice(0, 6)}...${addr.slice(-4)})`;
+                const titleStr = `${labelText}: weight ${weight} (${pct.toFixed(1)}%)`;
+
+                if (pct <= 0) return null;
+
+                return (
+                  <div
+                    key={addr}
+                    title={titleStr}
+                    style={{ width: `${pct}%` }}
+                    className={`${CHART_COLORS[idx % CHART_COLORS.length]} h-full transition-all duration-300 relative group cursor-pointer hover:brightness-110`}
+                  />
+                );
+              })}
+            </div>
+            {/* Legend */}
+            <div className="flex flex-wrap gap-x-4 gap-y-2 mt-2">
+              {ownerAddresses.map((addr, idx) => {
+                const weight = weights[addr] ?? 1;
+                const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
+                const ownerInfo = owners.find((o) => o.address === addr) || { label: `Signer ${idx + 1}`, address: addr };
+                return (
+                  <div key={addr} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                    <span className={`w-2.5 h-2.5 rounded-full ${CHART_COLORS[idx % CHART_COLORS.length]}`} />
+                    <span className="font-medium text-zinc-300">{ownerInfo.label}</span>
+                    <span className="font-mono text-zinc-500">({addr.slice(0, 6)}…{addr.slice(-4)})</span>
+                    <span className="font-medium text-zinc-300">({weight} w, {pct.toFixed(0)}%)</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Owners list with spending limits */}
       {owners.length === 0 ? (
         <div className="text-center py-12">
@@ -162,7 +238,14 @@ export function OwnersPage({
                   {owner.label[0]}
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm text-zinc-300">{owner.label}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-zinc-300">{owner.label}</p>
+                    {!weightsLoading && (
+                      <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
+                        Weight: {weights[owner.address] ?? 1}
+                      </span>
+                    )}
+                  </div>
                   <p className="font-mono text-xs text-zinc-500">{owner.address}</p>
                 </div>
               </div>
