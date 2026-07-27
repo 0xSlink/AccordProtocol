@@ -269,6 +269,10 @@ fn active_count_key() -> Symbol {
     symbol_short!("ACTCNT")
 }
 
+fn active_ids_key() -> Symbol {
+    symbol_short!("ACTIDS")
+}
+
 fn timelock_key() -> Symbol {
     symbol_short!("TLOCK")
 }
@@ -541,30 +545,98 @@ fn effective_spent(env: &Env, owner: &Address, token: &Address) -> i128 {
     tracker.spent
 }
 
+/// Returns the current number of active proposals read directly from the persisted `ACTCNT` storage.
+///
+/// Quietly expired proposals (proposals whose deadline passed without an explicit `execute` or
+/// `cancel_expired`) are lazily purged from the tracked active set (`ACTIDS`) during proposal
+/// creation (`register_active_proposal`) and removal, ensuring `ACTCNT` and `TooManyActiveProposals`
+/// checks stay exact and bounded without scanning full proposal history.
 fn read_active_count(env: &Env) -> u32 {
-    // Recompute active proposals (Pending + Ready) to ensure expired/ executed
-    // proposals are not counted, guarding against any missed decrements.
-    let next_id = env
-        .storage()
+    env.storage()
         .instance()
-        .get(&next_id_key())
-        .unwrap_or(1_u64);
-    let mut active: u32 = 0;
-    for id in 1..next_id {
-        if let Ok(proposal) = read_proposal(env, id) {
-            // derive_status does not persist; we only count current derived active ones
-            let status = derive_status(env, &proposal);
-            if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready) {
-                active = active.saturating_add(1);
-            }
-        }
-    }
-    active
+        .get(&active_count_key())
+        .unwrap_or(0)
 }
 
 fn write_active_count(env: &Env, count: u32) {
     env.storage().instance().set(&active_count_key(), &count);
     bump_instance(env);
+}
+
+fn read_active_ids(env: &Env) -> Vec<u64> {
+    let key = active_ids_key();
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    ids
+}
+
+fn write_active_ids(env: &Env, ids: &Vec<u64>) {
+    let key = active_ids_key();
+    env.storage().persistent().set(&key, ids);
+    bump_persistent(env, &key);
+}
+
+fn register_active_proposal(env: &Env, new_id: u64) -> Result<(), ContractError> {
+    let active_ids = read_active_ids(env);
+    let mut filtered_ids = Vec::new(env);
+
+    for id in active_ids.iter() {
+        if let Ok(proposal) = read_proposal(env, id) {
+            let status = derive_status(env, &proposal);
+            if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready) {
+                filtered_ids.push_back(id);
+            }
+        }
+    }
+
+    if filtered_ids.len() >= MAX_ACTIVE_PROPOSALS {
+        return Err(ContractError::TooManyActiveProposals);
+    }
+
+    filtered_ids.push_back(new_id);
+    let count = filtered_ids.len();
+    write_active_ids(env, &filtered_ids);
+    write_active_count(env, count);
+    Ok(())
+}
+
+fn remove_active_proposals(env: &Env, remove_ids: &Vec<u64>) {
+    let active_ids = read_active_ids(env);
+    let mut filtered_ids = Vec::new(env);
+
+    for id in active_ids.iter() {
+        let mut should_remove = false;
+        for rid in remove_ids.iter() {
+            if id == rid {
+                should_remove = true;
+                break;
+            }
+        }
+        if !should_remove {
+            if let Ok(proposal) = read_proposal(env, id) {
+                let status = derive_status(env, &proposal);
+                if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready) {
+                    filtered_ids.push_back(id);
+                }
+            }
+        }
+    }
+
+    let count = filtered_ids.len();
+    write_active_ids(env, &filtered_ids);
+    write_active_count(env, count);
+}
+
+fn remove_active_proposal(env: &Env, remove_id: u64) {
+    let mut remove_ids = Vec::new(env);
+    remove_ids.push_back(remove_id);
+    remove_active_proposals(env, &remove_ids);
 }
 
 fn read_guardian(env: &Env) -> Option<Address> {
@@ -929,15 +1001,8 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -952,7 +1017,10 @@ impl AccordContract {
             category: category.clone(),
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         let total_weight = read_total_weight(&env);
         env.events().publish(
@@ -1007,15 +1075,8 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -1030,7 +1091,10 @@ impl AccordContract {
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         let total_weight = read_total_weight(&env);
         env.events().publish(
@@ -1083,15 +1147,8 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -1106,7 +1163,10 @@ impl AccordContract {
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         let total_weight = read_total_weight(&env);
         env.events().publish(
@@ -1182,15 +1242,8 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -1205,7 +1258,10 @@ impl AccordContract {
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         env.events().publish(
             (symbol_short!("created"),),
@@ -1275,14 +1331,7 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -1297,7 +1346,10 @@ impl AccordContract {
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         let total_weight = read_total_weight(&env);
         env.events().publish(
@@ -1356,15 +1408,8 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
-        let active = read_active_count(&env);
-        if active >= MAX_ACTIVE_PROPOSALS {
-            return Err(ContractError::TooManyActiveProposals);
-        }
-
         let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
-        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
-        write_next_id(&env, next_id);
 
         let proposal = Proposal {
             id,
@@ -1379,7 +1424,10 @@ impl AccordContract {
             category: ProposalCategory::Other,
         };
         write_proposal(&env, &proposal);
-        write_active_count(&env, active + 1);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
 
         let total_weight = read_total_weight(&env);
         env.events().publish(
@@ -1516,10 +1564,7 @@ impl AccordContract {
         if matches!(proposal.status, ProposalStatus::Expired) {
             // Persist the expired status and free up the active slot.
             write_proposal(&env, &proposal);
-            let active = read_active_count(&env);
-            if active > 0 {
-                write_active_count(&env, active - 1);
-            }
+            remove_active_proposal(&env, proposal_id);
             return Err(ContractError::ProposalExpired);
         }
 
@@ -1709,8 +1754,8 @@ impl AccordContract {
 
                 // Invariant: ensure no active (Pending/Ready) proposal would
                 // become un-quorumable (quorum_weight > new_total_weight).
-                let next_id = read_next_id(&env);
-                for id in 1..next_id {
+                let active_ids = read_active_ids(&env);
+                for id in active_ids.iter() {
                     if let Ok(active_proposal) = read_proposal(&env, id) {
                         let status = derive_status(&env, &active_proposal);
                         if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
@@ -1730,10 +1775,7 @@ impl AccordContract {
         proposal.status = ProposalStatus::Executed;
         write_proposal(&env, &proposal);
 
-        let active = read_active_count(&env);
-        if active > 0 {
-            write_active_count(&env, active - 1);
-        }
+        remove_active_proposal(&env, proposal_id);
 
         let transfers = match &proposal.kind {
             ProposalKind::Transfer(transfers) => transfers.clone(),
@@ -1764,6 +1806,7 @@ impl AccordContract {
         require_owner_and_weight(&env, &caller)?;
 
         let mut swept: u32 = 0;
+        let mut swept_ids = Vec::new(&env);
 
         for id in ids.iter() {
             let proposal = match read_proposal(&env, id) {
@@ -1773,14 +1816,12 @@ impl AccordContract {
 
             if matches!(derive_status(&env, &proposal), ProposalStatus::Expired) {
                 swept = swept.saturating_add(1);
+                swept_ids.push_back(id);
             }
         }
 
         if swept > 0 {
-            let active = read_active_count(&env);
-            if active > 0 {
-                write_active_count(&env, active.saturating_sub(swept));
-            }
+            remove_active_proposals(&env, &swept_ids);
         }
 
         Ok(swept)

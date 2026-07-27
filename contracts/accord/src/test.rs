@@ -2132,6 +2132,60 @@ fn create_proposal_rejects_at_limit() {
     );
 }
 
+#[test]
+fn test_proposal_capacity_silent_expiration_lazy_sweep() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // Create 50 proposals.
+    // The first one will have a short deadline, e.g. NOW + 10.
+    // The rest will have DEADLINE.
+    let _id_short = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Short deadline proposal"),
+        &(NOW + 10),
+        &ProposalCategory::Transfer,
+    );
+
+    for i in 1..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 1_000_000, &token_client.address),
+            &str(&env, &format!("Proposal {}", i)),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // Attempting to create the 51st proposal before the short one expires should fail.
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 1_000_000, &token_client.address),
+            &str(&env, "51st proposal"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+
+    // Now, advance time past the short proposal's deadline.
+    env.ledger().set_timestamp(NOW + 20);
+
+    // Creating a 51st proposal should now succeed because the short proposal has expired
+    // and is swept lazily, freeing up a slot!
+    let id_new = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Success after sweep"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(id_new, 51);
+}
+
 // ─── Deadline Edge Cases ──────────────────────────────────────────────────────
 
 #[test]
@@ -6521,5 +6575,75 @@ fn upgrade_and_migrate_preserves_in_flight_proposal() {
     client.revoke(&owner_b, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
+
+#[test]
+fn active_count_lazy_prunes_expired_proposals_without_explicit_sweep() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let short_deadline = NOW + 100;
+    let long_deadline = NOW + 10_000;
+
+    // Fill up all 50 active proposal slots with short deadlines
+    for _ in 0..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Short proposal"),
+            &short_deadline,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // 51st proposal fails while short-deadline proposals are still active
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Overflow proposal"),
+            &short_deadline,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+
+    // Advance time past short_deadline so all 50 proposals expire quietly (no execute or sweep called)
+    set_timestamp(&env, short_deadline + 1);
+
+    // Creating a new proposal lazily prunes the silently expired proposals,
+    // allowing proposal creation to succeed without hitting TooManyActiveProposals.
+    let id51 = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000, &token_client.address),
+        &str(&env, "New proposal after silent expiration"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(id51, 51);
+
+    // Fill up 49 more long-deadline proposals (reaching max 50 active again)
+    for _ in 1..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Long proposal"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // The next proposal should fail because 50 long-deadline proposals are active
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Overflow proposal 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+}
+
 
 
