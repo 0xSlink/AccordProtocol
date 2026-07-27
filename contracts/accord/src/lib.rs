@@ -1258,10 +1258,7 @@ impl AccordContract {
         // Guard: removing this owner must not make the threshold unachievable.
         // With the absolute-weight model the correct check is whether the
         // remaining total weight would still be >= threshold.
-        let mut owners = read_owners_map(&env)?;
-        let removed_weight = owners.get(owner_to_remove.clone()).ok_or(ContractError::OwnerNotFound)?;
-        let total_weight = read_total_weight(&env);
-        let remaining_weight = total_weight
+        let owners = read_owners_map(&env)?;
         let removed_weight = owners
             .get(owner_to_remove.clone())
             .ok_or(ContractError::OwnerNotFound)?;
@@ -1269,11 +1266,9 @@ impl AccordContract {
         let resulting_total_weight = current_total_weight
             .checked_sub(removed_weight)
             .ok_or(ContractError::ArithmeticError)?;
-        if remaining_weight < threshold {
 
         // Check 1: Ensure the resulting total weight is still >= the contract's current threshold.
-        let current_threshold = read_threshold(&env)?;
-        if resulting_total_weight < current_threshold {
+        if resulting_total_weight < threshold {
             return Err(ContractError::WouldBreakThreshold);
         }
 
@@ -1289,8 +1284,6 @@ impl AccordContract {
                 }
             }
         }
-
-        // ... rest of the function
 
         if description.is_empty() {
             return Err(ContractError::EmptyDescription);
