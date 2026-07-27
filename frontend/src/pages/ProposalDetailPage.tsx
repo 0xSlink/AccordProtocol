@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { StatusBadge } from "../components/StatusBadge";
-import type { Proposal } from "../types/accord";
+import type { Proposal, ProposalEvent } from "../types/accord";
+import { getProposalEvents } from "../lib/contract";
 
 type ProposalDetailPageProps = {
   proposals: Proposal[];
@@ -36,8 +37,39 @@ export function ProposalDetailPage({
   const showExecute = connected && proposal?.status === "ready";
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
+  const [events, setEvents] = useState<ProposalEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState<boolean>(true);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+
   useEffect(() => {
     setAwaitingConfirmation(false);
+
+    if (!proposal) return;
+
+    let active = true;
+    setLoadingEvents(true);
+    setEventsError(null);
+
+    getProposalEvents(proposal.id)
+      .then((data) => {
+        if (active) {
+          setEvents(data);
+          setLoadingEvents(false);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          console.error("Failed to load proposal events:", err);
+          setEventsError(
+            err instanceof Error ? err.message : "Failed to load events."
+          );
+          setLoadingEvents(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [proposal?.id, proposal?.status]);
 
   if (!proposal) {
@@ -121,6 +153,68 @@ export function ProposalDetailPage({
         </p>
       </section>
 
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-[0.2em] text-zinc-600">
+            Activity Timeline
+          </p>
+          {loadingEvents && (
+            <span className="text-xs text-zinc-500 animate-pulse">
+              Loading events...
+            </span>
+          )}
+        </div>
+
+        {eventsError && (
+          <div className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+            {eventsError}
+          </div>
+        )}
+
+        {!loadingEvents && !eventsError && events.length === 0 && (
+          <p className="mt-4 text-sm text-zinc-500">No activity yet</p>
+        )}
+
+        {!loadingEvents && !eventsError && events.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {events.map((event, index) => {
+              const badgeColors =
+                event.type === "approved"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  : event.type === "executed"
+                  ? "bg-sky-500/10 text-sky-400 border-sky-500/20"
+                  : "bg-amber-500/10 text-amber-400 border-amber-500/20";
+
+              const label =
+                event.type === "approved"
+                  ? "Approved"
+                  : event.type === "executed"
+                  ? "Executed"
+                  : "Revoked";
+
+              return (
+                <div
+                  key={`${event.type}-${event.actor}-${index}`}
+                  className="flex flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium uppercase tracking-wider ${badgeColors}`}
+                    >
+                      {label}
+                    </span>
+                    <span className="font-mono text-sm text-zinc-200">
+                      {event.actor}
+                    </span>
+                  </div>
+                  <span className="text-xs text-zinc-500">{event.timestamp}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {(showApprove || showExecute) && (
         <section className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-5 sm:flex-row sm:items-center sm:justify-end">
           {showApprove && (
@@ -176,3 +270,4 @@ export function ProposalDetailPage({
     </div>
   );
 }
+

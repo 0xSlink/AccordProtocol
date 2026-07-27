@@ -542,7 +542,7 @@ fn remove_owner_rejected_when_remaining_weight_below_threshold() {
             &str(&env, "Remove heavy owner"),
             &DEADLINE,
         ),
-        Err(Ok(ContractError::WouldBreakThreshold))
+        Err(Ok(ContractError::WouldBreakQuorum))
     );
 
     // Removing owner_c (weight 1) would leave total_weight = 4 == threshold 4 — allowed.
@@ -2130,6 +2130,60 @@ fn create_proposal_rejects_at_limit() {
         ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
+}
+
+#[test]
+fn test_proposal_capacity_silent_expiration_lazy_sweep() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // Create 50 proposals.
+    // The first one will have a short deadline, e.g. NOW + 10.
+    // The rest will have DEADLINE.
+    let _id_short = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Short deadline proposal"),
+        &(NOW + 10),
+        &ProposalCategory::Transfer,
+    );
+
+    for i in 1..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 1_000_000, &token_client.address),
+            &str(&env, &format!("Proposal {}", i)),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // Attempting to create the 51st proposal before the short one expires should fail.
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 1_000_000, &token_client.address),
+            &str(&env, "51st proposal"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+
+    // Now, advance time past the short proposal's deadline.
+    env.ledger().set_timestamp(NOW + 20);
+
+    // Creating a 51st proposal should now succeed because the short proposal has expired
+    // and is swept lazily, freeing up a slot!
+    let id_new = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Success after sweep"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(id_new, 51);
 }
 
 // ─── Deadline Edge Cases ──────────────────────────────────────────────────────
@@ -3761,7 +3815,7 @@ fn change_weight_proposal_rejects_non_owner_and_leaves_state_unchanged() {
         client.try_create_change_weight_proposal(
             &owner_a,
             &non_owner,
-            &5,
+            &2,
             &str(&env, "Change non-owner weight"),
             &DEADLINE,
         ),
@@ -3773,8 +3827,8 @@ fn change_weight_proposal_rejects_non_owner_and_leaves_state_unchanged() {
     let id = client.create_change_weight_proposal(
         &owner_a,
         &owner_b,
-        &5,
-        &str(&env, "Change owner_b weight to 5"),
+        &2,
+        &str(&env, "Change owner_b weight to 2"),
         &DEADLINE,
     );
     assert!(id > 0);
@@ -5270,19 +5324,17 @@ fn setup_weighted() -> (Env, AccordContractClient<'static>, Address, Address, Ad
 fn weighted_quorum_logic() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
     let id = client.create_proposal(
-        &owner_a,
+        &owner_c,
         &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
         &str(&env, "Weighted quorum"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    // single approvals do not reach quorum
-    client.approve(&owner_a, &id);
+    // owner_c proposed (weight 2). Single approval (2) does not reach threshold (6).
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
-    client.approve(&owner_b, &id);
+    client.approve(&owner_b, &id); // weight 2 + 3 = 5 < 6
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
-    client.approve(&owner_c, &id);
-    // heavy (5) + light (2) = 7 >= 6, should be Ready now
+    client.approve(&owner_a, &id); // weight 5 + 5 = 10 >= 6
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 }
 
@@ -6521,5 +6573,180 @@ fn upgrade_and_migrate_preserves_in_flight_proposal() {
     client.revoke(&owner_b, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
+
+#[test]
+fn active_count_lazy_prunes_expired_proposals_without_explicit_sweep() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let short_deadline = NOW + 100;
+    let long_deadline = NOW + 10_000;
+
+    // Fill up all 50 active proposal slots with short deadlines
+    for _ in 0..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Short proposal"),
+            &short_deadline,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // 51st proposal fails while short-deadline proposals are still active
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Overflow proposal"),
+            &short_deadline,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+
+    // Advance time past short_deadline so all 50 proposals expire quietly (no execute or sweep called)
+    set_timestamp(&env, short_deadline + 1);
+
+    // Creating a new proposal lazily prunes the silently expired proposals,
+    // allowing proposal creation to succeed without hitting TooManyActiveProposals.
+    let id51 = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000, &token_client.address),
+        &str(&env, "New proposal after silent expiration"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(id51, 51);
+
+    // Fill up 49 more long-deadline proposals (reaching max 50 active again)
+    for _ in 1..50 {
+        client.create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Long proposal"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    // The next proposal should fail because 50 long-deadline proposals are active
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &t(&env, &recipient, 100_000, &token_client.address),
+            &str(&env, "Overflow proposal 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
+}
+
+#[test]
+fn removed_owner_stale_approval_entry_behavior() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // owner_a creates proposal #1
+    let prop_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000, &token_client.address),
+        &str(&env, "Test proposal"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // owner_b approves proposal #1
+    client.approve(&owner_b, &prop_id);
+    assert!(client.has_approved(&prop_id, &owner_b));
+    let approvers_before = client.get_approvers(&prop_id);
+    assert!(approvers_before.contains(&owner_b));
+
+    // Remove owner_b via RemoveOwner proposal
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_a, &remove_id);
+
+    assert!(!client.is_owner(&owner_b));
+
+    // Stale APPR entry remains in persistent storage, so has_approved returns true
+    assert!(client.has_approved(&prop_id, &owner_b));
+
+    // get_approvers filters by active owners, so owner_b is excluded from current approvers list
+    let approvers_after = client.get_approvers(&prop_id);
+    assert!(!approvers_after.contains(&owner_b));
+}
+
+#[test]
+fn removed_then_readded_owner_inherits_stale_spending_limit() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let limit_amount: i128 = 500_000;
+
+    // 1. Set spending limit for owner_b
+    let limit_id = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_b,
+        &token_client.address,
+        &limit_amount,
+        &str(&env, "Set spending limit for owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id);
+    client.approve(&owner_c, &limit_id);
+    client.execute(&owner_a, &limit_id);
+
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+
+    // 2. Remove owner_b via RemoveOwner
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Remove owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_a, &remove_id);
+
+    assert!(!client.is_owner(&owner_b));
+
+    // Persistent SLIMIT entry is not purged on removal
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+
+    // 3. Re-add owner_b via AddOwner
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &owner_b,
+        &str(&env, "Re-add owner B"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_c, &add_id);
+    client.execute(&owner_a, &add_id);
+
+    assert!(client.is_owner(&owner_b));
+
+    // The re-added owner immediately inherits the stale spending limit entry
+    assert_eq!(
+        client.get_spending_limit(&owner_b, &token_client.address),
+        Some(limit_amount)
+    );
+}
+
+
 
 
