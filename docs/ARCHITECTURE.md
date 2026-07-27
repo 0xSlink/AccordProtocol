@@ -61,6 +61,7 @@ All instance-storage keys share **one** `LedgerEntry` (the contract instance). T
 | `THRESH` | `u32`  | Approval threshold                        | 518,400 / 17,280                 |
 | `NEXT`   | `u64`  | Monotonic proposal ID counter             | 518,400 / 17,280                 |
 | `ACTCNT` | `u32`  | Active proposal count (budget guard)      | 518,400 / 17,280                 |
+| `TWGT`   | `u32`  | Cached total owner weight                  | 518,400 / 17,280                 |
 | `TLOCK`  | `u64`  | Time-lock delay in seconds (0 = disabled) | 518,400 / 17,280                 |
 
 **Instance entry cost**: all five keys together occupy roughly **~150 bytes** XDR-encoded (rounds to 1 KB for billing) → **~0.052 XLM per 30 days** (see [Storage Cost Methodology](#storage-cost-methodology) below).

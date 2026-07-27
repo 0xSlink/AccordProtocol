@@ -286,7 +286,7 @@ fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Add
 }
 
 fn total_weight_key() -> Symbol {
-    symbol_short!("TWEIGHT")
+    symbol_short!("TWGT")
 }
 
 // Tracks whether this contract's owners already carry real per-owner voting
