@@ -5373,9 +5373,363 @@ fn test_quorum_matrix_change_threshold_and_change_threshold_blocked() {
 
     client.execute(&owners.get(0).unwrap(), &p1);
     client.execute(&owners.get(0).unwrap(), &p2);
-    
+
     // They don't block each other, they just overwrite.
     assert_eq!(client.get_threshold(), 3);
+}
+
+// ─── Weighted-Governance Migration (#290) ────────────────────────────────────
+//
+// `setup()` always initializes through the weighted `initialize`, which sets
+// the governance-version flag to `true` immediately (it already has real
+// per-owner weights from the start). To exercise `migrate_to_weighted_governance`
+// against a contract that *needs* migration, these tests flip that flag back
+// to `false` via direct storage manipulation — the same technique already used
+// elsewhere in this file (see `total_weight_overflow_rejected_at_add_owner`) —
+// to simulate a contract deployed before the flag existed at all.
+
+fn mark_governance_unmigrated(env: &Env, contract_id: &Address) {
+    env.as_contract(contract_id, || {
+        env.storage()
+            .instance()
+            .set(&governance_version_key(), &false);
+    });
+}
+
+#[test]
+fn migrate_to_weighted_governance_succeeds_assigns_equal_weights_and_sets_flag() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+    assert!(!client.is_governance_migrated());
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    client.migrate_to_weighted_governance(&approvers);
+
+    assert!(client.is_governance_migrated());
+    assert_eq!(client.get_owner_weight(&owner_a), 1);
+    assert_eq!(client.get_owner_weight(&owner_b), 1);
+    assert_eq!(client.get_owner_weight(&owner_c), 1);
+    assert_eq!(client.get_total_weight(), 3);
+}
+
+#[test]
+fn migrate_to_weighted_governance_emits_event() {
+    let (env, client, owner_a, owner_b, _, _, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    client.migrate_to_weighted_governance(&approvers);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let migrated_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("migrated")
+    });
+    let event = migrated_event.expect("expected a 'migrated' event to be emitted");
+    let event_data = match &event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: GovernanceMigratedEvent = event_data.into_val(&env);
+    assert_eq!(event.owner_count, 3);
+    assert_eq!(event.total_weight, 3);
+}
+
+/// Acceptance: calling the migration function a second time fails with a
+/// clear, specific error and makes no changes to stored weight data.
+#[test]
+fn migrate_rejects_second_call_and_leaves_weights_unchanged() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    client.migrate_to_weighted_governance(&approvers);
+
+    let weight_a_before = client.get_owner_weight(&owner_a);
+    let weight_b_before = client.get_owner_weight(&owner_b);
+    let weight_c_before = client.get_owner_weight(&owner_c);
+    let total_before = client.get_total_weight();
+
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::AlreadyMigrated))
+    );
+
+    // No partial or duplicate state changes from the rejected second call.
+    assert_eq!(client.get_owner_weight(&owner_a), weight_a_before);
+    assert_eq!(client.get_owner_weight(&owner_b), weight_b_before);
+    assert_eq!(client.get_owner_weight(&owner_c), weight_c_before);
+    assert_eq!(client.get_total_weight(), total_before);
+}
+
+/// Acceptance: calling the migration function against a contract that never
+/// needed migration (already initialized with weights from the start) is
+/// also correctly rejected — without ever flipping the flag back to legacy.
+#[test]
+fn migrate_rejects_when_never_needed() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+    assert!(client.is_governance_migrated());
+
+    let weight_a_before = client.get_owner_weight(&owner_a);
+    let weight_b_before = client.get_owner_weight(&owner_b);
+    let weight_c_before = client.get_owner_weight(&owner_c);
+    let total_before = client.get_total_weight();
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::AlreadyMigrated))
+    );
+
+    assert_eq!(client.get_owner_weight(&owner_a), weight_a_before);
+    assert_eq!(client.get_owner_weight(&owner_b), weight_b_before);
+    assert_eq!(client.get_owner_weight(&owner_c), weight_c_before);
+    assert_eq!(client.get_total_weight(), total_before);
+}
+
+#[test]
+fn migrate_rejects_non_owner() {
+    let (env, client, _, _, _, non_owner, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(non_owner.clone());
+    approvers.push_back(Address::generate(&env));
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::Unauthorized))
+    );
+}
+
+#[test]
+fn migrate_rejects_below_threshold() {
+    let (env, client, owner_a, _, _, _, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+}
+
+#[test]
+fn migrate_rejects_duplicate_approver() {
+    let (env, client, owner_a, _, _, _, _) = setup(2);
+    mark_governance_unmigrated(&env, &client.address);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_a.clone());
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::DuplicateOwner))
+    );
+}
+
+#[test]
+fn migrate_rejects_before_initialize() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+    let approvers = Vec::new(&env);
+    assert_eq!(
+        client.try_migrate_to_weighted_governance(&approvers),
+        Err(Ok(ContractError::NotInitialized))
+    );
+}
+
+// ─── Migration Regression: weighted vs. flat-count equivalence (#291) ───────
+
+/// Proves that a freshly-migrated contract with all-equal weights produces
+/// identical approval outcomes to a pre-migration flat-count contract for the
+/// same sequence of approve/revoke calls. Two independent, otherwise-identical
+/// 3-owner/threshold-2 multisigs are driven through the same action sequence;
+/// at every step the derived proposal status must match exactly, including
+/// the precise approval that flips Pending to Ready and a revoke-then-reapprove
+/// cycle back to Ready.
+#[test]
+fn migration_preserves_approval_outcomes_across_approve_revoke_sequence() {
+    let (env_pre, client_pre, a_pre, b_pre, c_pre, _, token_pre) = setup(2);
+    let (env_post, client_post, a_post, b_post, c_post, _, token_post) = setup(2);
+
+    // `client_post` represents the same multisig, but migrated from a legacy,
+    // flag-less state rather than born weighted.
+    mark_governance_unmigrated(&env_post, &client_post.address);
+    let mut approvers = Vec::new(&env_post);
+    approvers.push_back(a_post.clone());
+    approvers.push_back(b_post.clone());
+    client_post.migrate_to_weighted_governance(&approvers);
+    assert!(client_post.is_governance_migrated());
+
+    let id_pre = client_pre.create_proposal(
+        &a_pre,
+        &t(&env_pre, &Address::generate(&env_pre), 1_000_000, &token_pre.address),
+        &str(&env_pre, "Regression"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let id_post = client_post.create_proposal(
+        &a_post,
+        &t(&env_post, &Address::generate(&env_post), 1_000_000, &token_post.address),
+        &str(&env_post, "Regression"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Step 1: first approval on both — 1 of 2 required, must stay Pending.
+    client_pre.approve(&a_pre, &id_pre);
+    client_post.approve(&a_post, &id_post);
+    assert_eq!(client_pre.get_proposal(&id_pre).status, ProposalStatus::Pending);
+    assert_eq!(client_post.get_proposal(&id_post).status, ProposalStatus::Pending);
+    assert_eq!(
+        client_pre.get_proposal(&id_pre).status,
+        client_post.get_proposal(&id_post).status
+    );
+
+    // Step 2: the second approval is the exact one that crosses the
+    // threshold — both must transition to Ready here, not before.
+    client_pre.approve(&b_pre, &id_pre);
+    client_post.approve(&b_post, &id_post);
+    assert_eq!(client_pre.get_proposal(&id_pre).status, ProposalStatus::Ready);
+    assert_eq!(client_post.get_proposal(&id_post).status, ProposalStatus::Ready);
+    assert_eq!(
+        client_pre.get_proposal(&id_pre).status,
+        client_post.get_proposal(&id_post).status
+    );
+
+    // Step 3: revoke drops both back below threshold, back to Pending.
+    client_pre.revoke(&b_pre, &id_pre);
+    client_post.revoke(&b_post, &id_post);
+    assert_eq!(client_pre.get_proposal(&id_pre).status, ProposalStatus::Pending);
+    assert_eq!(client_post.get_proposal(&id_post).status, ProposalStatus::Pending);
+    assert_eq!(
+        client_pre.get_proposal(&id_pre).status,
+        client_post.get_proposal(&id_post).status
+    );
+
+    // Step 4: a different owner reapproves — both reach Ready again,
+    // confirming the revoke-then-reapprove cycle matches at every point.
+    client_pre.approve(&c_pre, &id_pre);
+    client_post.approve(&c_post, &id_post);
+    assert_eq!(client_pre.get_proposal(&id_pre).status, ProposalStatus::Ready);
+    assert_eq!(client_post.get_proposal(&id_post).status, ProposalStatus::Ready);
+    assert_eq!(
+        client_pre.get_proposal(&id_pre).status,
+        client_post.get_proposal(&id_post).status
+    );
+}
+
+// ─── Upgrade + Migration Compatibility (#293) ────────────────────────────────
+
+/// End-to-end continuity check across a real code upgrade followed by the
+/// one-time weighted-governance migration: a proposal created and partially
+/// approved under the pre-upgrade code must still evaluate correctly
+/// afterward, and must keep evaluating correctly under continued
+/// approve/revoke traffic once migrated.
+///
+/// Limitation, documented per this issue's own fallback clause: exercising a
+/// *genuinely different* compiled WASM version side-by-side with the current
+/// one isn't practical inside this test suite. The pre-migration "flat-count"
+/// contract predates `migrate_to_weighted_governance` itself, so no
+/// historical WASM artifact for it exists to import; self-importing this
+/// same crate's own build output would require `cargo test` to depend on a
+/// prior `stellar contract build`/`cargo build --target wasm32v1-none` pass,
+/// coupling the unit test suite to a prebuilt artifact at compile time and
+/// breaking `cargo test` for anyone who runs it without that build step
+/// first — and would still only be testing this crate against itself rather
+/// than a genuinely prior version. A hand-written byte buffer can't stand in
+/// for one either: `upload_contract_wasm` validates real WASM structure (the
+/// magic header, then a Soroban contract metadata section), so only an
+/// actual compiled contract binary is accepted. The closest achievable
+/// equivalent implemented here performs a real `upload_contract_wasm` +
+/// `upgrade` call (using the same empty-bytes placeholder the pre-existing
+/// upgrade tests use, since that's what the host accepts without a real
+/// second build) followed by the real `migrate_to_weighted_governance` call
+/// and continued approve/revoke traffic against a proposal that existed
+/// before either step — exercising the storage- and quorum-continuity
+/// behavior that actually matters for a live deployment through the real
+/// functions involved, rather than re-verifying upgrade and migration in
+/// isolation from each other.
+#[test]
+fn upgrade_and_migrate_preserves_in_flight_proposal() {
+    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
+
+    // Create a proposal and give it partial approval (1 of 2) before the
+    // upgrade — meaningfully in progress, but not yet Ready.
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
+        &str(&env, "Pre-upgrade transfer"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // `upload_contract_wasm` validates real WASM structure (magic header,
+    // then a Soroban contract metadata section), so a hand-written byte
+    // buffer can't stand in for a real second contract build — confirming,
+    // in practice, the limitation documented above. Follow the same
+    // placeholder pattern the pre-existing upgrade tests use (empty bytes)
+    // for the upload/hash step; the substance under test is the migration
+    // and proposal-continuity behavior around the upgrade call, not WASM
+    // validation itself.
+    let new_wasm_hash = env.deployer().upload_contract_wasm(Bytes::new(&env));
+    let mut upgrade_approvers = Vec::new(&env);
+    upgrade_approvers.push_back(owner_a.clone());
+    upgrade_approvers.push_back(owner_b.clone());
+    client.upgrade(&upgrade_approvers, &new_wasm_hash);
+
+    // The in-flight proposal's snapshot survives the upgrade unchanged.
+    let proposal_after_upgrade = client.get_proposal(&id);
+    assert_eq!(proposal_after_upgrade.status, ProposalStatus::Pending);
+    assert_eq!(proposal_after_upgrade.approvals, 1);
+    assert_eq!(proposal_after_upgrade.quorum_weight, 2);
+
+    // Run the one-time migration against the now-upgraded contract. This
+    // multisig was already weighted from `initialize`, so flip the flag back
+    // to represent the realistic order of operations: a genuinely legacy,
+    // pre-flag deployment being migrated shortly after its code upgrade (see
+    // docs/DEPLOYMENT.md's migration runbook).
+    mark_governance_unmigrated(&env, &client.address);
+    let mut migrate_approvers = Vec::new(&env);
+    migrate_approvers.push_back(owner_a.clone());
+    migrate_approvers.push_back(owner_b.clone());
+    client.migrate_to_weighted_governance(&migrate_approvers);
+    assert!(client.is_governance_migrated());
+
+    // The pre-existing proposal still reflects its original snapshot and is
+    // still correctly Pending (1 of 2 required) after migration.
+    let proposal_after_migration = client.get_proposal(&id);
+    assert_eq!(proposal_after_migration.status, ProposalStatus::Pending);
+    assert_eq!(proposal_after_migration.approvals, 1);
+    assert_eq!(proposal_after_migration.quorum_weight, 2);
+
+    // A post-migration approval on the pre-existing proposal transitions it
+    // correctly under the (now explicit) weighted logic.
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+
+    // And a post-migration revoke on the same pre-existing proposal
+    // transitions it back down correctly too.
+    client.revoke(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
 
 

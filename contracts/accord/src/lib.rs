@@ -187,6 +187,13 @@ pub struct SetSpendingLimitExecutedEvent {
     pub new_limit: i128,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct GovernanceMigratedEvent {
+    pub owner_count: u32,
+    pub total_weight: u32,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +232,7 @@ pub enum ContractError {
     InvalidWeightsLength = 30,
     SingleOwnerWeightCapExceeded = 31,
     TargetOwnerNoLongerExists = 32,
+    AlreadyMigrated = 33,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -275,6 +283,16 @@ fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Add
 
 fn total_weight_key() -> Symbol {
     symbol_short!("TWEIGHT")
+}
+
+// Tracks whether this contract's owners already carry real per-owner voting
+// weights — either because it was initialized directly with weights, or
+// because `migrate_to_weighted_governance` has already run. Missing key means
+// the contract predates this flag entirely (a genuinely legacy, flat-count
+// deployment), which is exactly the state `migrate_to_weighted_governance` is
+// meant to run against.
+fn governance_version_key() -> Symbol {
+    symbol_short!("GOVVER")
 }
 
 fn max_single_owner_weight_pct_key() -> Symbol {
@@ -376,6 +394,20 @@ fn is_initialized(env: &Env) -> bool {
         .instance()
         .get::<_, bool>(&init_key())
         .unwrap_or(false)
+}
+
+fn governance_migrated(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get::<_, bool>(&governance_version_key())
+        .unwrap_or(false)
+}
+
+fn write_governance_migrated(env: &Env, migrated: bool) {
+    env.storage()
+        .instance()
+        .set(&governance_version_key(), &migrated);
+    bump_instance(env);
 }
 
 fn read_threshold(env: &Env) -> Result<u32, ContractError> {
@@ -706,7 +738,99 @@ impl AccordContract {
             .instance()
             .set(&timelock_key(), &time_lock_delay);
         env.storage().instance().set(&init_key(), &true);
+        // A contract initialized through this function already has real,
+        // explicit per-owner weights from the start, so it never needs (and
+        // must never accept) `migrate_to_weighted_governance`.
+        env.storage()
+            .instance()
+            .set(&governance_version_key(), &true);
         bump_instance(&env);
+
+        Ok(())
+    }
+
+    /// One-time migration for a multisig that was deployed before per-owner
+    /// voting weights existed (a flat M-of-N approval count). Assigns every
+    /// current owner a weight of one and sets the total weight equal to the
+    /// owner count — mathematically identical to the prior flat-count model,
+    /// so the weighted quorum comparison behaves exactly like the old one for
+    /// the same sequence of approvals.
+    ///
+    /// Guarded the same way `initialize`'s `AlreadyInitialized` check works:
+    /// the governance-version flag is inspected before any weight data is
+    /// touched, and a contract that already has real per-owner weights —
+    /// whether because it was already migrated, or because it was initialized
+    /// directly through the weighted `initialize` — rejects the call with
+    /// `AlreadyMigrated` outright.
+    ///
+    /// # Arguments
+    /// * `approvers` - Distinct owner addresses co-signing the migration. The
+    ///   pre-migration threshold is a flat approval count (not a weight), so
+    ///   authorization here requires that many *distinct* registered owners,
+    ///   not a summed weight.
+    pub fn migrate_to_weighted_governance(
+        env: Env,
+        approvers: Vec<Address>,
+    ) -> Result<(), ContractError> {
+        if !is_initialized(&env) {
+            return Err(ContractError::NotInitialized);
+        }
+        if governance_migrated(&env) {
+            return Err(ContractError::AlreadyMigrated);
+        }
+
+        for i in 0..approvers.len() {
+            for j in (i + 1)..approvers.len() {
+                if approvers.get(i).unwrap() == approvers.get(j).unwrap() {
+                    return Err(ContractError::DuplicateOwner);
+                }
+            }
+        }
+
+        let owners = read_owners_map(&env)?;
+        let threshold = read_threshold(&env)?;
+
+        let mut approver_count: u32 = 0;
+        for approver in approvers.iter() {
+            approver.require_auth();
+            if !owners.contains_key(approver.clone()) {
+                return Err(ContractError::Unauthorized);
+            }
+            approver_count = approver_count
+                .checked_add(1)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+        if approver_count < threshold {
+            return Err(ContractError::ThresholdNotMet);
+        }
+
+        let mut migrated_owners = Map::new(&env);
+        let mut total_weight: u32 = 0;
+        for owner in owners.keys().iter() {
+            migrated_owners.set(owner.clone(), MIN_OWNER_WEIGHT);
+            total_weight = total_weight
+                .checked_add(MIN_OWNER_WEIGHT)
+                .ok_or(ContractError::ArithmeticError)?;
+        }
+        let owner_count = migrated_owners.len();
+
+        let key = owners_key();
+        env.storage().persistent().set(&key, &migrated_owners);
+        bump_persistent(&env, &key);
+        write_total_weight(&env, total_weight);
+
+        // Set last: a second call (or a call against a contract that never
+        // needed migration) must be caught by the guard at the top of this
+        // function before any weight data is touched.
+        write_governance_migrated(&env, true);
+
+        env.events().publish(
+            (symbol_short!("migrated"),),
+            GovernanceMigratedEvent {
+                owner_count,
+                total_weight,
+            },
+        );
 
         Ok(())
     }
@@ -1673,6 +1797,15 @@ impl AccordContract {
 
     pub fn get_total_weight(env: Env) -> u32 {
         read_total_weight(&env)
+    }
+
+    /// Returns whether this contract's owners already carry real per-owner
+    /// voting weights — `true` for any contract initialized directly through
+    /// the weighted `initialize`, or for a legacy contract that has already
+    /// run `migrate_to_weighted_governance`. A deployer verifying whether
+    /// migration is still needed should call this before invoking it.
+    pub fn is_governance_migrated(env: Env) -> bool {
+        governance_migrated(&env)
     }
 
     /// Returns a current owner's voting weight, or `OwnerNotFound` otherwise.

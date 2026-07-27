@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 6,
     "nonce": 0,
     "mux_id": 0
   },
@@ -146,6 +146,10 @@
         }
       ]
     ],
+    [],
+    [],
+    [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -299,6 +303,10 @@
     [],
     [],
     [],
+    [],
+    [],
+    [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -306,16 +314,16 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_remove_owner_proposal",
+              "function_name": "create_add_owner_proposal",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                 },
                 {
-                  "string": "fuzz remove"
+                  "string": "fuzz add"
                 },
                 {
                   "u64": "87400"
@@ -373,6 +381,13 @@
     ],
     [],
     [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
     []
   ],
   "ledger": {
@@ -409,6 +424,22 @@
                   {
                     "key": {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     },
                     "val": {
                       "u32": 1
@@ -811,7 +842,7 @@
                       "symbol": "description"
                     },
                     "val": {
-                      "string": "fuzz remove"
+                      "string": "fuzz add"
                     }
                   },
                   {
@@ -829,10 +860,10 @@
                     "val": {
                       "vec": [
                         {
-                          "symbol": "RemoveOwner"
+                          "symbol": "AddOwner"
                         },
                         {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                         }
                       ]
                     }
@@ -906,6 +937,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "GOVVER"
+                      },
+                      "val": {
+                        "bool": true
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "INIT"
                       },
                       "val": {
@@ -949,7 +988,7 @@
                         "symbol": "TWEIGHT"
                       },
                       "val": {
-                        "u32": 2
+                        "u32": 4
                       }
                     }
                   ]
