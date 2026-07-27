@@ -972,6 +972,278 @@ fn approve_returns_arithmetic_error_on_overflow() {
     );
 }
 
+// ─── Weighted Approve ────────────────────────────────────────────────────────
+
+#[test]
+fn approve_transitions_to_ready_with_weighted_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: Owner A = 5, Owner B = 3, Owner C = 2. Quorum = 8.
+    // Cumulative weight from A+B is 8, meeting the threshold.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Weighted status"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Owner A (weight 5) alone should not reach quorum 8.
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    // Owner B (weight 3) pushes cumulative to 8, reaching quorum.
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+}
+
+#[test]
+fn approve_records_ready_at_with_weighted_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: Owner A = 3, Owner B = 3, Owner C = 1. Quorum = 5.
+    // A+B = 6 >= 5, crosses threshold on second approval.
+    let mut weights = Vec::new(&env);
+    weights.push_back(3);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &5, &3600); // time-lock of 1h to exercise ready_at
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 100_000_000, &token_client.address),
+        &str(&env, "Ready-at weighted"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    assert_eq!(client.get_proposal(&id).ready_at, 0);
+
+    // Owner A (weight 3) — not yet at quorum 5.
+    let t1 = NOW + 100;
+    set_timestamp(&env, t1);
+    client.approve(&owner_a, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approvals, 3);
+    assert_eq!(p.ready_at, 0);
+
+    // Owner B (weight 3) — cumulative reaches 6, crossing quorum 5.
+    let t2 = t1 + 200;
+    set_timestamp(&env, t2);
+    client.approve(&owner_b, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approvals, 6);
+    assert_eq!(p.ready_at, t2);
+}
+
+// ─── Event Payloads ───────────────────────────────────────────────────────────
+
+#[test]
+fn approve_emits_weight_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=2. Quorum = 8.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Event weight test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve owner_a (weight 5) — cumulative should be 5.
+    client.approve(&owner_a, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let approved_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("approved")
+    })
+    .expect("expected an 'approved' event");
+
+    let event_data = match &approved_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalApprovedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 5);
+    assert_eq!(event.cumulative_weight, 5);
+
+    // Approve owner_b (weight 3) — cumulative should be 8.
+    client.approve(&owner_b, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let approved_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("approved")
+    })
+    .expect("expected an 'approved' event");
+
+    let event_data = match &approved_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalApprovedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 3);
+    assert_eq!(event.cumulative_weight, 8);
+}
+
+#[test]
+fn revoke_emits_weight_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=2. Quorum = 8.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &8, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Revoke event weight test"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve A (5) then B (3) to reach quorum 8.
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+
+    // Revoke B (weight 3) — cumulative should drop from 8 to 5.
+    client.revoke(&owner_b, &id);
+
+    let contract_events = env.events().all().filter_by_contract(&client.address);
+    let revoked_event = contract_events.events().iter().find(|event| {
+        let event_topics = match &event.body {
+            xdr::ContractEventBody::V0(body) => body.topics.clone(),
+        };
+        let Some(topic) = event_topics.first() else {
+            return false;
+        };
+        let topic: Symbol = topic.clone().into_val(&env);
+        topic == symbol_short!("revoked")
+    })
+    .expect("expected a 'revoked' event");
+
+    let event_data = match &revoked_event.body {
+        xdr::ContractEventBody::V0(body) => body.data.clone(),
+    };
+    let event: ProposalRevokedEvent = event_data.into_val(&env);
+    assert_eq!(event.weight, 3);
+    assert_eq!(event.cumulative_weight, 5);
+}
+
 // ─── Revoke ──────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1564,10 +1836,6 @@ fn full_lifecycle_5of5() {
     owners.push_back(owner_b.clone());
     owners.push_back(owner_c.clone());
 
-    let mut weights = Vec::new(&env);
-    weights.push_back(1);
-    weights.push_back(1);
-    weights.push_back(1);
     owners.push_back(owner_d.clone());
     owners.push_back(owner_e.clone());
     let mut weights = Vec::new(&env);
@@ -1797,6 +2065,121 @@ fn get_approvers_rejects_unknown_proposal() {
     );
 }
 
+// ─── Weighted has_approved / get_approvers ─────────────────────
+
+#[test]
+fn has_approved_and_get_approvers_weight_independent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=5, B=3, C=1. Threshold = 5 (lowest weight that alone meets quorum).
+    // Only owner_c (weight 1) approves — has_approved and get_approvers must
+    // reflect owner_c as approved and owner_a as not, regardless of weight.
+    let mut weights = Vec::new(&env);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &5, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Weight independence"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Only the low-weight owner (C, weight 1) approves.
+    client.approve(&owner_c, &id);
+
+    // has_approved must be true for owner_c and false for others.
+    assert!(client.has_approved(&id, &owner_c));
+    assert!(!client.has_approved(&id, &owner_a));
+    assert!(!client.has_approved(&id, &owner_b));
+
+    // get_approvers must contain only owner_c — weight must not influence the set.
+    let approvers = client.get_approvers(&id);
+    assert_eq!(approvers.len(), 1);
+    assert!(approvers.contains(&owner_c));
+    assert!(!approvers.contains(&owner_a));
+    assert!(!approvers.contains(&owner_b));
+}
+
+#[test]
+fn has_approved_and_get_approvers_revoke_weight_independent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+
+    // Weights: A=100 (very high), B=1, C=1. Threshold = 100.
+    // Owner A (highest weight) approves then revokes — the binary flag must
+    // flip correctly regardless of A's weight.
+    let mut weights = Vec::new(&env);
+    weights.push_back(100);
+    weights.push_back(1);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &100, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(&env, &Address::generate(&env), 100_000_000, &token_client.address),
+        &str(&env, "Revoke weight independence"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Approve — binary flag must be set.
+    client.approve(&owner_a, &id);
+    assert!(client.has_approved(&id, &owner_a));
+    let approvers_after_approve = client.get_approvers(&id);
+    assert!(approvers_after_approve.contains(&owner_a));
+
+    // Revoke — binary flag must be cleared, regardless of weight.
+    client.revoke(&owner_a, &id);
+    assert!(!client.has_approved(&id, &owner_a));
+    let approvers_after_revoke = client.get_approvers(&id);
+    assert!(!approvers_after_revoke.contains(&owner_a));
+}
+
 // ─── Upgrade ─────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1885,6 +2268,151 @@ fn upgrade_emits_event() {
     let event: UpgradeExecutedEvent = event_data.into_val(&env);
     assert_eq!(event.caller, owner_a);
     assert_eq!(event.new_wasm_hash, dummy_hash);
+}
+
+// ─── Weighted Co-Signer Validation ────────────────────────────────────────────
+
+fn setup_weighted_owners() -> (Env, AccordContractClient<'static>, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let owner_c = Address::generate(&env);
+    let owner_d = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin);
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    // Weights: A=7, B=5, C=3, D=1. Total = 16.
+    // Threshold = 10 (weight quorum).
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+    owners.push_back(owner_c.clone());
+    owners.push_back(owner_d.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(7);
+    weights.push_back(5);
+    weights.push_back(3);
+    weights.push_back(1);
+    client.initialize(&owners, &weights, &10, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    (env, client, owner_a, owner_b, owner_c, owner_d)
+}
+
+// ─── set_guardian ─────────────────────────────────────────────────────────────
+
+#[test]
+fn set_guardian_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // A (7) + C (3) = 10 >= threshold 10 — only 2 signers for a threshold of 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_c);
+    client.set_guardian(&approvers, &guardian);
+
+    assert_eq!(client.get_guardian(), Some(guardian));
+}
+
+#[test]
+fn set_guardian_weight_insufficient_fails() {
+    let (env, client, owner_a, _, _, owner_d) = setup_weighted_owners();
+
+    // A (7) + D (1) = 8 < threshold 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_d);
+    assert_eq!(
+        client.try_set_guardian(&approvers, &Address::generate(&env)),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+}
+
+// ─── unfreeze ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn unfreeze_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // Set guardian with A + C (weight 10 >= 10).
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_c.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    // Freeze via guardian.
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    // Unfreeze with A + C (weight 10 >= 10).
+    client.unfreeze(&approvers);
+    assert!(!client.is_frozen());
+}
+
+#[test]
+fn unfreeze_weight_insufficient_fails() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let guardian = Address::generate(&env);
+
+    // Set guardian with A + C (weight 10 >= 10).
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_c.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    // Freeze via guardian.
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    // Unfreeze with A alone (weight 7 < 10) — should fail.
+    let mut insufficient = Vec::new(&env);
+    insufficient.push_back(owner_a);
+    assert_eq!(
+        client.try_unfreeze(&insufficient),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
+    assert!(client.is_frozen());
+}
+
+// ─── upgrade ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn upgrade_weight_sufficient_succeeds() {
+    let (env, client, owner_a, _, owner_c, _) = setup_weighted_owners();
+    let dummy_hash: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+
+    // A (7) + C (3) = 10 >= threshold 10 — only 2 signers for a threshold of 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_c);
+    // Should not return a ContractError for the weight check.
+    let result = client.try_upgrade(&approvers, &dummy_hash);
+    assert_ne!(result, Err(Ok(ContractError::ThresholdNotMet)));
+}
+
+#[test]
+fn upgrade_weight_insufficient_fails() {
+    let (env, client, owner_a, _, _, owner_d) = setup_weighted_owners();
+    let dummy_hash: BytesN<32> = BytesN::from_array(&env, &[0u8; 32]);
+
+    // A (7) + D (1) = 8 < threshold 10.
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a);
+    approvers.push_back(owner_d);
+    assert_eq!(
+        client.try_upgrade(&approvers, &dummy_hash),
+        Err(Ok(ContractError::ThresholdNotMet))
+    );
 }
 
 // ─── Active Count ─────────────────────────────────────────────────────────────

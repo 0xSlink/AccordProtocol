@@ -355,8 +355,8 @@ The contract address plus one topic string together uniquely identify a stream o
 | Topics          | Data Type                                                      | Consumer            |
 | --------------- | -------------------------------------------------------------- | ------------------- |
 | `("created",)`  | `ProposalCreatedEvent { id, proposer, to, amount, threshold }` | Proposal feed       |
-| `("approved",)` | `ProposalApprovedEvent { id, approver, approvals, threshold }` | Approval bar update |
-| `("revoked",)`  | `ProposalRevokedEvent { id, approver, approvals }`             | Approval bar update |
+| `("approved",)` | `ProposalApprovedEvent { id, approver, approvals, threshold, weight, cumulative_weight }` | Approval bar update |
+| `("revoked",)`  | `ProposalRevokedEvent { id, approver, approvals, weight, cumulative_weight }`             | Approval bar update |
 | `("executed",)` | `ProposalExecutedEvent { id, executor, to, amount }`           | Execution history   |
 
 ### Indexing Accord Events
