@@ -32,8 +32,8 @@ pub struct Transfer {
 pub enum ProposalKind {
     /// Transfer(transfers)
     Transfer(Vec<Transfer>),
-    /// AddOwner(new_owner)
-    AddOwner(Address),
+    /// AddOwner(new_owner, weight)
+    AddOwner(Address, u32),
     /// RemoveOwner(owner_to_remove)
     RemoveOwner(Address),
     /// ChangeThreshold(new_threshold)
@@ -976,12 +976,27 @@ impl AccordContract {
         env: Env,
         proposer: Address,
         new_owner: Address,
+        weight: u32,
+
+        if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&weight) {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let current_total = read_total_weight(&env);
+        let resulting_total = current_total
+            .checked_add(weight)
+            .ok_or(ContractError::ArithmeticError)?;
+        if !owner_weight_within_cap(&env, weight, resulting_total) {
+            return Err(ContractError::SingleOwnerWeightCapExceeded);
+        }
+
         description: String,
         deadline: u64,
     ) -> Result<u64, ContractError> {
         proposer.require_auth();
         require_owner_and_weight(&env, &proposer)?;
         require_not_frozen(&env)?;
+
 
         let owners = read_owners_map(&env)?;
         if owners.contains_key(new_owner.clone()) {
@@ -1024,7 +1039,7 @@ impl AccordContract {
             deadline,
             approvals: 0,
             status: ProposalStatus::Pending,
-            kind: ProposalKind::AddOwner(new_owner),
+            kind: ProposalKind::AddOwner(new_owner, weight),
             ready_at: 0,
             quorum_weight: threshold,
             category: ProposalCategory::Other,
@@ -1599,21 +1614,29 @@ impl AccordContract {
                     write_spent_tracker(&env, &proposer, &token, &SpentTracker { spent, epoch });
                 }
             }
-            ProposalKind::AddOwner(new_owner) => {
+            ProposalKind::AddOwner(new_owner, weight) => {
+                if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(weight) {
+                    return Err(ContractError::InvalidWeight);
+                }
+                let current_total = read_total_weight(&env);
+                let new_total = current_total
+                    .checked_add(*weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+                if !owner_weight_within_cap(&env, *weight, new_total) {
+                    return Err(ContractError::SingleOwnerWeightCapExceeded);
+                }
+
                 let mut owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
-                owners.set(new_owner.clone(), MIN_OWNER_WEIGHT);
+                owners.set(new_owner.clone(), *weight);
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
-                // New owners start at MIN_OWNER_WEIGHT; keep the counter in
-                // lockstep with the implicit default returned by read_owner_weight.
-                write_total_weight(
-                    &env,
-                    read_total_weight(&env)
-                        .checked_add(MIN_OWNER_WEIGHT)
-                        .ok_or(ContractError::ArithmeticError)?,
-                );
+
+                let current_total = read_total_weight(&env);
+                let new_total = current_total.checked_add(*weight).ok_or(ContractError::ArithmeticError)?;
+                write_total_weight(&env, new_total);
+
                 env.events().publish(
                     (symbol_short!("a_own"),),
                     AddOwnerExecutedEvent {

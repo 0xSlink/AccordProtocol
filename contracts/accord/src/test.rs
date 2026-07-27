@@ -306,6 +306,7 @@ fn quorum_weight_unchanged_when_owner_added() {
     let add_id = client.create_add_owner_proposal(
         &owner_a,
         &non_owner,
+        &1,
         &str(&env, "Add fourth owner"),
         &DEADLINE,
     );
@@ -2839,6 +2840,7 @@ fn add_owner_full_lifecycle() {
     let id = client.create_add_owner_proposal(
         &owner_a,
         &non_owner,
+        &1,
         &str(&env, "Add a fourth owner"),
         &DEADLINE,
     );
@@ -2867,6 +2869,7 @@ fn create_add_owner_proposal_rejects_existing_owner() {
         client.try_create_add_owner_proposal(
             &owner_a,
             &owner_b,
+            &1,
             &str(&env, "Re-add an existing owner"),
             &DEADLINE,
         ),
@@ -2903,10 +2906,78 @@ fn create_add_owner_proposal_rejects_at_max_owners() {
         client.try_create_add_owner_proposal(
             &first_owner,
             &new_owner,
+            &1,
             &str(&env, "Exceed the owner cap"),
             &DEADLINE,
         ),
         Err(Ok(ContractError::InvalidOwners))
+    );
+}
+
+#[test]
+fn add_owner_with_explicit_weight() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+    let new_owner = Address::generate(&env);
+    let new_weight = 5;
+
+    let id = client.create_add_owner_proposal(
+        &owner_a,
+        &new_owner,
+        &new_weight,
+        &str(&env, "Add owner with weight 5"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    client.execute(&owner_c, &id);
+
+    assert_eq!(client.get_owner_weight(&new_owner), new_weight);
+    // Initial total weight was 3 (3 owners * 1). New total is 3 + 5 = 8.
+    assert_eq!(client.get_total_weight(), 8);
+}
+
+#[test]
+fn add_owner_with_explicit_weight_from_proposal() {
+    let (env, client, owner_a, owner_b, owner_c, _, _) = setup(2);
+    let new_owner = Address::generate(&env);
+    let new_weight = 5;
+
+    let id = client.create_add_owner_proposal(
+        &owner_a,
+        &new_owner,
+        &new_weight,
+        &str(&env, "Add owner with weight 5"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    client.execute(&owner_c, &id);
+
+    assert_eq!(client.get_owner_weight(&new_owner), new_weight);
+    assert_eq!(client.get_total_weight(), 8); // 3 (initial) + 5 (new) = 8
+}
+
+#[test]
+fn create_add_owner_proposal_rejects_weight_exceeding_cap() {
+    let (env, client, owner_a, _, _, _, _) = setup(2);
+    let new_owner = Address::generate(&env);
+
+    // Initial total weight is 3.
+    // Proposing a new owner with weight 4.
+    // Resulting total would be 3 + 4 = 7.
+    // Cap check: 4 * 100 <= 7 * 50  => 400 <= 350 (false).
+    // So this must be rejected.
+    assert_eq!(
+        client.try_create_add_owner_proposal(
+            &owner_a,
+            &new_owner,
+            &4,
+            &str(&env, "Weight exceeds cap"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::SingleOwnerWeightCapExceeded))
     );
 }
 
@@ -3906,7 +3977,7 @@ proptest! {
                 // Add only below MAX_OWNERS. New owners always start at weight 1.
                 0 if owners.len() < 20 => {
                     let new_owner = Address::generate(&env);
-                    let id = client.create_add_owner_proposal(&proposer, &new_owner, &str(&env, "fuzz add"), &DEADLINE);
+                    let id = client.create_add_owner_proposal(&proposer, &new_owner, &1, &str(&env, "fuzz add"), &DEADLINE);
                     client.approve(&proposer, &id);
                     client.execute(&proposer, &id);
                     owners.push_back(new_owner);
@@ -4618,6 +4689,7 @@ fn add_owner_execute_emits_add_owner_event() {
     let id = client.create_add_owner_proposal(
         &owner_a,
         &new_owner,
+        &1,
         &str(&env, "Add new owner"),
         &DEADLINE,
     );
@@ -5088,6 +5160,7 @@ fn add_owner_with_maximum_weight() {
     let add_id = client.create_add_owner_proposal(
         &owner_a,
         &new_owner,
+        &MIN_OWNER_WEIGHT,
         &str(&env, "Add new owner"),
         &DEADLINE,
     );
@@ -5164,6 +5237,7 @@ fn total_weight_overflow_rejected_at_add_owner() {
     let add_id = client.create_add_owner_proposal(
         &owner_a,
         &new_owner,
+        &1,
         &str(&env, "Add would overflow"),
         &DEADLINE,
     );
@@ -6259,5 +6333,3 @@ fn upgrade_and_migrate_preserves_in_flight_proposal() {
     client.revoke(&owner_b, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
-
-
