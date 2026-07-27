@@ -244,6 +244,87 @@ fn initialize_rejects_threshold_above_count() {
     );
 }
 
+// ─── Initialize: Owners/Weights Length Validation (issue #304) ─────────────
+
+/// A weights list longer than the owners list must be rejected, and the
+/// rejection must not leave the contract partially initialized — a
+/// subsequent call with matching lengths still succeeds rather than failing
+/// with `AlreadyInitialized`.
+#[test]
+fn initialize_rejects_more_weights_than_owners_and_leaves_uninitialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut too_many_weights = Vec::new(&env);
+    too_many_weights.push_back(1_u32);
+    too_many_weights.push_back(1_u32);
+    too_many_weights.push_back(1_u32);
+
+    assert_eq!(
+        client.try_initialize(&owners, &too_many_weights, &1, &0),
+        Err(Ok(ContractError::InvalidWeightsLength))
+    );
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+    client.initialize(&owners, &weights, &1, &0);
+    assert_eq!(client.get_owners().len(), 2);
+}
+
+/// A weights list shorter than the owners list must be rejected with the
+/// same error as a too-long list.
+#[test]
+fn initialize_rejects_fewer_weights_than_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+
+    assert_eq!(
+        client.try_initialize(&owners, &weights, &1, &0),
+        Err(Ok(ContractError::InvalidWeightsLength))
+    );
+}
+
+/// Baseline sanity check alongside the two mismatch tests above: an equal-
+/// length owners/weights pair initializes normally.
+#[test]
+fn initialize_accepts_matching_owners_and_weights_length() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+    owners.push_back(Address::generate(&env));
+
+    let mut weights = Vec::new(&env);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+    weights.push_back(1_u32);
+
+    client.initialize(&owners, &weights, &1, &0);
+    assert_eq!(client.get_owners().len(), 3);
+}
+
 // ─── Absolute-weight quorum model ────────────────────────────────────────────
 
 /// The threshold is an absolute weight value, not a count of owners. Validate
