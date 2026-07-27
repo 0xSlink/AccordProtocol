@@ -237,6 +237,7 @@ pub enum ContractError {
     SingleOwnerWeightCapExceeded = 31,
     TargetOwnerNoLongerExists = 32,
     AlreadyMigrated = 33,
+    WouldBreakQuorum = 34,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -1313,7 +1314,7 @@ impl AccordContract {
             .checked_sub(removed_weight)
             .ok_or(ContractError::ArithmeticError)?;
         if remaining_weight < threshold {
-            return Err(ContractError::WouldBreakThreshold);
+            return Err(ContractError::WouldBreakQuorum);
         }
 
         if description.is_empty() {
@@ -1761,7 +1762,7 @@ impl AccordContract {
                         if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
                             && active_proposal.quorum_weight > new_total
                         {
-                            return Err(ContractError::WouldBreakThreshold);
+                            return Err(ContractError::WouldBreakQuorum);
                         }
                     }
                 }

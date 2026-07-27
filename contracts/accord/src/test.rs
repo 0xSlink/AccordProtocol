@@ -542,7 +542,7 @@ fn remove_owner_rejected_when_remaining_weight_below_threshold() {
             &str(&env, "Remove heavy owner"),
             &DEADLINE,
         ),
-        Err(Ok(ContractError::WouldBreakThreshold))
+        Err(Ok(ContractError::WouldBreakQuorum))
     );
 
     // Removing owner_c (weight 1) would leave total_weight = 4 == threshold 4 — allowed.
@@ -3815,7 +3815,7 @@ fn change_weight_proposal_rejects_non_owner_and_leaves_state_unchanged() {
         client.try_create_change_weight_proposal(
             &owner_a,
             &non_owner,
-            &5,
+            &2,
             &str(&env, "Change non-owner weight"),
             &DEADLINE,
         ),
@@ -3827,8 +3827,8 @@ fn change_weight_proposal_rejects_non_owner_and_leaves_state_unchanged() {
     let id = client.create_change_weight_proposal(
         &owner_a,
         &owner_b,
-        &5,
-        &str(&env, "Change owner_b weight to 5"),
+        &2,
+        &str(&env, "Change owner_b weight to 2"),
         &DEADLINE,
     );
     assert!(id > 0);
@@ -5324,19 +5324,17 @@ fn setup_weighted() -> (Env, AccordContractClient<'static>, Address, Address, Ad
 fn weighted_quorum_logic() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup_weighted();
     let id = client.create_proposal(
-        &owner_a,
+        &owner_c,
         &t(&env, &Address::generate(&env), 1_000_000, &token_client.address),
         &str(&env, "Weighted quorum"),
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    // single approvals do not reach quorum
-    client.approve(&owner_a, &id);
+    // owner_c proposed (weight 2). Single approval (2) does not reach threshold (6).
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
-    client.approve(&owner_b, &id);
+    client.approve(&owner_b, &id); // weight 2 + 3 = 5 < 6
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
-    client.approve(&owner_c, &id);
-    // heavy (5) + light (2) = 7 >= 6, should be Ready now
+    client.approve(&owner_a, &id); // weight 5 + 5 = 10 >= 6
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 }
 
