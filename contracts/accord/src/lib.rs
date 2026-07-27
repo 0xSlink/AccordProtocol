@@ -1323,14 +1323,31 @@ impl AccordContract {
         // Guard: removing this owner must not make the threshold unachievable.
         // With the absolute-weight model the correct check is whether the
         // remaining total weight would still be >= threshold.
-        let mut owners = read_owners_map(&env)?;
-        let removed_weight = owners.get(owner_to_remove.clone()).ok_or(ContractError::OwnerNotFound)?;
-        let total_weight = read_total_weight(&env);
-        let remaining_weight = total_weight
+        let owners = read_owners_map(&env)?;
+        let removed_weight = owners
+            .get(owner_to_remove.clone())
+            .ok_or(ContractError::OwnerNotFound)?;
+        let current_total_weight = read_total_weight(&env);
+        let resulting_total_weight = current_total_weight
             .checked_sub(removed_weight)
             .ok_or(ContractError::ArithmeticError)?;
-        if remaining_weight < threshold {
-            return Err(ContractError::WouldBreakQuorum);
+
+        // Check 1: Ensure the resulting total weight is still >= the contract's current threshold.
+        if resulting_total_weight < threshold {
+            return Err(ContractError::WouldBreakThreshold);
+        }
+
+        // Check 2: Ensure no other active (Pending/Ready) proposal would become un-quorumable.
+        let next_id = read_next_id(&env);
+        for id in 1..next_id {
+            if let Ok(active_proposal) = read_proposal(&env, id) {
+                let status = derive_status(&env, &active_proposal);
+                if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
+                    && active_proposal.quorum_weight > resulting_total_weight
+                {
+                    return Err(ContractError::WouldBreakThreshold);
+                }
+            }
         }
 
         if description.is_empty() {
@@ -1348,6 +1365,12 @@ impl AccordContract {
             return Err(ContractError::InvalidDuration);
         }
 
+        let active = read_active_count(&env);
+        if active >= MAX_ACTIVE_PROPOSALS {
+            return Err(ContractError::TooManyActiveProposals);
+        }
+
+        let threshold = read_threshold(&env)?;
         let id = read_next_id(&env);
 
         let proposal = Proposal {
@@ -1687,17 +1710,44 @@ impl AccordContract {
                 let mut owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
                 let weight = owners.get(owner_to_remove.clone()).unwrap_or(0);
+
+                let current_total_weight = read_total_weight(&env);
+                let resulting_total_weight = current_total_weight
+                    .checked_sub(weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+
+                // Re-validation 1: Ensure the resulting total weight is still >= the contract's current threshold.
+                let current_threshold = read_threshold(&env)?;
+                if resulting_total_weight < current_threshold {
+                    return Err(ContractError::WouldBreakThreshold);
+                }
+
+                // Re-validation 2: Ensure no other active (Pending/Ready) proposal would become un-quorumable.
+                // The current proposal (this one) is already being executed, so it doesn't
+                // need to be checked against itself.
+                let next_id = read_next_id(&env);
+                for id in 1..next_id {
+                    if id == proposal_id {
+                        continue;
+                    }
+                    if let Ok(active_proposal) = read_proposal(&env, id) {
+                        let status = derive_status(&env, &active_proposal);
+                        if matches!(status, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && active_proposal.quorum_weight > resulting_total_weight
+                        {
+                            return Err(ContractError::WouldBreakThreshold);
+                        }
+                    }
+                }
+
                 owners.remove(owner_to_remove.clone());
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
 
-                let current_total = read_total_weight(&env);
                 write_total_weight(
                     &env,
-                    current_total
-                        .checked_sub(weight)
-                        .ok_or(ContractError::ArithmeticError)?,
+                    resulting_total_weight,
                 );
 
                 env.events().publish(
