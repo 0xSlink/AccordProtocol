@@ -1334,7 +1334,6 @@ impl AccordContract {
 
         let total_weight = read_total_weight(&env);
 
-        if new_threshold == 0 || new_threshold > read_total_weight(&env) {
         // The threshold is an absolute weight value. Validate it against the
         // current total weight so the proposed threshold is always achievable
         // given the current weight distribution.
