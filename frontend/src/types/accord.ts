@@ -34,3 +34,13 @@ export type DashboardStat = {
   value: string;
   sub: string;
 };
+
+export type ProposalEventType = "approved" | "revoked" | "executed";
+
+export type ProposalEvent = {
+  type: ProposalEventType;
+  actor: string;
+  timestamp: string;
+  ledger?: number;
+};
+

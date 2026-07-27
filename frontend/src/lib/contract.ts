@@ -6,7 +6,14 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Proposal, ProposalCategory, ProposalKind, ProposalStatus } from "../types/accord";
+import type {
+  Proposal,
+  ProposalCategory,
+  ProposalEvent,
+  ProposalEventType,
+  ProposalKind,
+  ProposalStatus,
+} from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
@@ -341,3 +348,101 @@ export async function getApprovers(proposalId: number): Promise<string[]> {
     return [];
   }
 }
+
+function parseScVal(val: unknown): unknown {
+  if (!val) return null;
+  if (typeof val === "string") {
+    try {
+      return scValToNative(xdr.ScVal.fromXDR(val, "base64"));
+    } catch {
+      return val;
+    }
+  }
+  try {
+    return scValToNative(val as xdr.ScVal);
+  } catch {
+    return val;
+  }
+}
+
+function formatEventTimestamp(ledgerClosedAt?: string, ledger?: number): string {
+  if (ledgerClosedAt) {
+    const d = new Date(ledgerClosedAt);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    }
+  }
+  if (ledger) {
+    return `Ledger #${ledger}`;
+  }
+  return "Just now";
+}
+
+export async function getProposalEvents(proposalId: number): Promise<ProposalEvent[]> {
+  try {
+    let startLedger = 1;
+    try {
+      const latest = await getLatestLedger();
+      startLedger = Math.max(1, latest - 10000);
+    } catch {
+      startLedger = 1;
+    }
+
+    const res = await server.getEvents({
+      startLedger,
+      filters: [
+        {
+          type: "contract",
+          contractIds: [CONTRACT_ID],
+        },
+      ],
+      limit: 100,
+    });
+
+    const events: ProposalEvent[] = [];
+
+    if (res.events && Array.isArray(res.events)) {
+      for (const rawEv of res.events) {
+        try {
+          const rawTopic = Array.isArray(rawEv.topic) ? rawEv.topic : [rawEv.topic];
+          const topics = rawTopic.map(parseScVal);
+          const topicName = String(topics[0] ?? "").toLowerCase();
+
+          if (topicName === "approved" || topicName === "revoked" || topicName === "executed") {
+            const nativeValue = parseScVal(rawEv.value) as Record<string, unknown> | null;
+            if (nativeValue && typeof nativeValue === "object") {
+              const eventPropId = Number(nativeValue.id ?? -1);
+              if (eventPropId === proposalId) {
+                const rawActor = String(
+                  nativeValue.approver ?? nativeValue.executor ?? nativeValue.actor ?? ""
+                );
+                const actor = rawActor ? shortenAddr(rawActor) : "Unknown";
+                const timestamp = formatEventTimestamp(rawEv.ledgerClosedAt, rawEv.ledger);
+
+                events.push({
+                  type: topicName as ProposalEventType,
+                  actor,
+                  timestamp,
+                  ledger: rawEv.ledger,
+                });
+              }
+            }
+          }
+        } catch (evErr) {
+          console.warn("Failed to parse event record:", evErr);
+        }
+      }
+    }
+
+    // Sort chronologically (oldest to newest)
+    events.sort((a, b) => (a.ledger ?? 0) - (b.ledger ?? 0));
+    return events;
+  } catch (err) {
+    console.error(`Failed to fetch events for proposal #${proposalId}:`, err);
+    throw err;
+  }
+}
+
