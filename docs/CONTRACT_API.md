@@ -40,7 +40,8 @@ Scan this table when you hit an error code and need a fast answer. Errors develo
 | 21 `InvalidDuration` | Deadline is more than 90 days from now. | Cap the deadline at ≤ 90 days ahead. |
 | 22 `InvalidRecipient` | Transfer recipient is the contract's own address. | Use an external recipient address. |
 | 28 `SpendingLimitExceeded` | Proposal amount exceeds the proposer's per-token spending limit. | Lower the amount or raise/remove the spending limit. |
-| 29 `InvalidWeight` | An owner weight is zero or outside the supported range. | Use a positive valid weight; use `RemoveOwner` rather than setting weight to zero. |
+| 29 `InvalidWeight` | An owner weight is above the maximum allowed value. | Use a weight within the `[MIN_OWNER_WEIGHT, MAX_OWNER_WEIGHT]` range. |
+| 30 `WeightBelowMinimum` | An owner weight is below the minimum allowed value (zero is never valid). | Use a positive weight; use `RemoveOwner` rather than setting weight to zero. |
 | 31 `SingleOwnerWeightCapExceeded` | A weight change would give one owner more than the configured share of total voting weight. | Choose a lower weight or adjust the quorum-authorized cap deliberately. |
 | 23 `TimeLockActive` | Time-lock delay after reaching `Ready` has not elapsed. | Wait until `ready_at + time_lock_delay`, then execute. |
 | 26 `ContractFrozen` | Contract is frozen; create/execute paths are blocked. | Co-sign `unfreeze` with threshold owners. |
@@ -54,6 +55,8 @@ Scan this table when you hit an error code and need a fast answer. Errors develo
 | 34 `WouldBreakQuorum` | Weight change or owner removal would leave total weight below threshold or leave an active proposal un-quorumable. | Lower threshold first or wait for active proposals to finish before modifying weights. |
 | 25 `OwnerNotFound` | Address to remove is not in the current owner list. | Verify with `is_owner` / `get_owners` first. |
 | 20 `ArithmeticError` | Integer overflow/underflow guard tripped (rare). | Contact maintainers; should not occur in normal use. |
+| 32 `TargetOwnerNoLongerExists` | The target of a `ChangeOwnerWeight` proposal is no longer an owner at execution time. | This is an edge case; create a new proposal. |
+| 33 `AlreadyMigrated` | `migrate_to_weighted_governance` was called on a contract that already has weighted governance. | Do not re-migrate; the contract is already up-to-date. |
 
 ---
 
@@ -649,6 +652,12 @@ The table below maps every `ContractError` discriminant to its cause and the rec
 | 27 | `NoGuardian` | `freeze` was called but no guardian address has been stored in the contract (the `GUARD` storage key is absent). | Call `set_guardian` with distinct owner co-signers whose combined weight reaches threshold. |
 | 28 | `SpendingLimitExceeded` | The proposer's aggregate amount for a token in `create_proposal` exceeds the per-owner spending limit stored for that `(owner, token)` pair. Raised only when a limit has been set; unrestricted owners are unaffected. | Lower the proposal amount so it fits under the limit, or raise/clear the limit via the spending-limit governance path before retrying. |
 | 34 | `WouldBreakQuorum` | A proposal creation or owner weight modification was rejected because total remaining weight would fall below threshold, or executing the weight change would leave an active (`Pending` or `Ready`) proposal's required quorum weight unreachable (`active_proposal.quorum_weight > new_total_weight`). | Lower the threshold first via `create_change_threshold_proposal`, wait for active proposals to complete or expire, or ensure remaining total weight is sufficient to satisfy all active proposal quorums. |
+
+| 29 | `InvalidWeight` | An owner weight supplied to `initialize` or `create_change_weight_proposal` is above the maximum allowed value (`MAX_OWNER_WEIGHT`). | Use a weight within the allowed range. |
+| 30 | `WeightBelowMinimum` | An owner weight supplied to `initialize` or `create_change_weight_proposal` is below the minimum allowed value (`MIN_OWNER_WEIGHT`). Zero is never a valid weight. | Use a positive weight. To revoke voting rights, use `create_remove_owner_proposal` instead of setting weight to zero. |
+| 31 | `SingleOwnerWeightCapExceeded` | A `ChangeOwnerWeight` proposal was rejected because the `new_weight` would give the `target_owner` a share of the resulting total weight greater than the configured maximum (default 50%). | Choose a lower `new_weight` that respects the cap, or have a quorum of owners deliberately raise the cap via `set_max_single_owner_weight_pct`. |
+| 32 | `TargetOwnerNoLongerExists` | A `ChangeOwnerWeight` proposal was executed, but the `target_owner` had been removed from the multisig between proposal creation and execution. | This is an expected guard for an edge case. The proposal has no effect. A new proposal would be needed to change the weight of a current owner. |
+| 33 | `AlreadyMigrated` | `migrate_to_weighted_governance` was called on a contract that already has per-owner weights, either from initialization or a prior migration. The call is rejected to prevent accidental state changes. | Do not call `migrate_to_weighted_governance` again. The contract is already using the weighted governance model. |
 
 ---
 
