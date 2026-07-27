@@ -665,13 +665,21 @@ pub struct AccordContract;
 
 #[contractimpl]
 impl AccordContract {
-    /// One-shot initializer. Sets the list of owners, the approval threshold,
-    /// and an optional time-lock delay (in seconds). A delay of 0 means no
-    /// time-lock is enforced.
+    /// One-shot initializer. Sets the list of owners with their individual
+    /// voting weights, the approval threshold, and an optional time-lock delay
+    /// (in seconds). A delay of 0 means no time-lock is enforced.
     ///
     /// # Arguments
     /// * `owners` - Non-empty list of unique owner addresses (max 20).
-    /// * `threshold` - Number of approvals required to execute a proposal (1 ≤ threshold ≤ owners.len()).
+    /// * `weights` - Per-owner voting weights, one per owner, in the same order
+    ///   as `owners`. Each weight must be within `[MIN_OWNER_WEIGHT,
+    ///   MAX_OWNER_WEIGHT]`. The list length must exactly match `owners.len()`.
+    ///   The sum of all weights becomes the initial total-weight counter used
+    ///   for quorum calculations.
+    /// * `threshold` - Absolute weight value required to execute a proposal
+    ///   (1 ≤ threshold ≤ sum of all owner weights). A proposal becomes
+    ///   `Ready` once its cumulative approval weight meets or exceeds this
+    ///   value.
     /// * `time_lock_delay` - Seconds to wait after a proposal reaches threshold before it is executable.
     pub fn initialize(
         env: Env,
