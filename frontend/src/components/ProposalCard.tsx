@@ -11,6 +11,10 @@ type ProposalCardProps = {
   onApprove: (id: number) => void;
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
+  // weight-based props (new)
+  approvalWeight?: number;
+  quorumWeight?: number;
+  totalWeight?: number;
 };
 
 const KIND_LABELS: Record<ProposalKind, { title: string; badge: string }> = {
@@ -126,6 +130,9 @@ export const ProposalCard = React.memo(function ProposalCard({
   onApprove,
   onExecute,
   onRevoke,
+  approvalWeight = 0,
+  quorumWeight = 0,
+  totalWeight = 0,
 }: ProposalCardProps) {
   const connected = !!walletAddress;
   const showApprove = proposal.status === "pending" && !proposal.userHasApproved;
@@ -252,10 +259,10 @@ export const ProposalCard = React.memo(function ProposalCard({
       </div>
 
       <div className="flex items-center justify-between mt-4">
-        <ApprovalBar 
-          approvals={proposal.approvals} 
-          threshold={proposal.threshold} 
-          approverAddresses={proposal.approverAddresses}
+        <ApprovalBar
+          approvalWeight={approvalWeight ?? 0}
+          quorumWeight={quorumWeight ?? proposal.threshold}
+          totalWeight={totalWeight ?? 0}
         />
 
         <div className="flex items-center gap-2">

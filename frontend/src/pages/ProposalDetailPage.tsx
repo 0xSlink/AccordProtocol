@@ -3,7 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { ApprovalBar } from "../components/ApprovalBar";
 import { StatusBadge } from "../components/StatusBadge";
 import type { Proposal, ProposalEvent } from "../types/accord";
-import { getProposalEvents } from "../lib/contract";
+import { getProposalEvents, getOwners, getRequiredQuorumWeight } from "../lib/contract";
+import { useOwnerWeights } from "../hooks/useOwnerWeights";
 
 type ProposalDetailPageProps = {
   proposals: Proposal[];
@@ -40,6 +41,32 @@ export function ProposalDetailPage({
   const [events, setEvents] = useState<ProposalEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState<boolean>(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
+
+  // Owners / weights for weight-based approval bar
+  const [ownerAddresses, setOwnerAddresses] = useState<string[]>([]);
+  const { weights, totalWeight } = useOwnerWeights(ownerAddresses);
+  const [quorumWeight, setQuorumWeight] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    getOwners()
+      .then((owners) => {
+        if (active) setOwnerAddresses(owners);
+      })
+      .catch(() => {
+        /* noop */
+      });
+
+    getRequiredQuorumWeight()
+      .then((w) => {
+        if (active) setQuorumWeight(w);
+      })
+      .catch(() => {
+        /* noop */
+      });
+
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     setAwaitingConfirmation(false);
@@ -119,9 +146,9 @@ export function ProposalDetailPage({
           </div>
           <div className="sm:min-w-64">
             <ApprovalBar
-              approvals={proposal.approvals}
-              threshold={proposal.threshold}
-              approverAddresses={proposal.approverAddresses}
+            approvalWeight={(proposal.approverAddresses || []).reduce((acc, addr) => acc + (weights[addr] ?? 0), 0)}
+            quorumWeight={quorumWeight || proposal.threshold}
+            totalWeight={totalWeight}
             />
           </div>
         </div>

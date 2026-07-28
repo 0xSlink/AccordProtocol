@@ -3,6 +3,8 @@ import type { DashboardStat, Owner, Proposal } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import { StatCard } from "../components/StatCard";
 import { ProposalCardSkeleton } from "../components/ProposalCardSkeleton";
+import { useOwnerWeights } from "../hooks/useOwnerWeights";
+import { getRequiredQuorumWeight } from "../lib/contract";
 
 type DashboardPageProps = {
   activeProposals: Proposal[];
@@ -42,6 +44,23 @@ export function DashboardPage({
     if (!sortByDeadline) return right.id - left.id;
     return left.deadlineTs - right.deadlineTs;
   });
+
+  // Compute owner weights and quorum weight for weight-based UI
+  const ownerAddresses = owners.map((o) => o.address);
+  const { weights, totalWeight, loading: weightsLoading } = useOwnerWeights(ownerAddresses);
+  const [quorumWeight, setQuorumWeight] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    getRequiredQuorumWeight()
+      .then((w) => {
+        if (active) setQuorumWeight(w);
+      })
+      .catch(() => {
+        /* noop */
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (readyCount > prevReadyCount.current) {
@@ -126,16 +145,23 @@ export function DashboardPage({
             <p>Create a new proposal to start the approval flow.</p>
           </div>
         ) : (
-          displayedProposals.map((proposal) => (
-            <ProposalCard
-              key={proposal.id}
-              proposal={proposal}
-              walletAddress={walletAddress}
-              onApprove={onApprove}
-              onExecute={onExecute}
-              onRevoke={onRevoke}
-            />
-          ))
+          displayedProposals.map((proposal) => {
+            // Sum approval weight by summing known owner weights for approver addresses
+            const approvalWeight = (proposal.approverAddresses || []).reduce((acc, addr) => acc + (weights[addr] ?? 0), 0);
+            return (
+              <ProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                walletAddress={walletAddress}
+                onApprove={onApprove}
+                onExecute={onExecute}
+                onRevoke={onRevoke}
+                approvalWeight={approvalWeight}
+                quorumWeight={quorumWeight}
+                totalWeight={totalWeight}
+              />
+            );
+          })
         )}
       </div>
 
