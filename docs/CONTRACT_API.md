@@ -294,6 +294,23 @@ Returns the current voting weight for `owner`. The weight reflects the owner's i
 
 ---
 
+## `get_owner_weights`
+
+```rust
+fn get_owner_weights(env: Env) -> Result<Vec<OwnerWeight>, ContractError>
+```
+
+Returns every current owner's address paired with their voting weight, in a single call. The returned list is a `Vec<OwnerWeight>` where each entry contains an `owner` field (the address) and a `weight` field (the owner's individual voting weight). The sum of all returned weights equals the current total-weight counter. This avoids the need for N separate `get_owner_weight` calls when rendering a full governance overview. Read-only; no authorization required.
+
+| Return field | Type | Description |
+|---|---|---|
+| `owner` | `Address` | A current owner's address |
+| `weight` | `u32` | That owner's individual voting weight |
+
+**Errors:** `NotInitialized`
+
+---
+
 ## `has_approved`
 
 ```rust

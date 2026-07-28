@@ -5609,6 +5609,72 @@ fn get_owner_weight_returns_owner_not_found_for_non_owner() {
     assert_eq!(client.get_owner_weight(&owner_b), 1);
 }
 
+// ─── get_owner_weights ────────────────────────────────────────────────────
+
+/// Confirms get_owner_weights returns every owner with the correct weight
+/// for a multisig with several owners holding different weights, and that
+/// the sum of returned weights matches the total-weight counter.
+#[test]
+fn get_owner_weights_returns_all_owners_with_correct_weights() {
+    let (env, client, owner_a, owner_b, owner_c, token_client) =
+        setup_three_owner_weighted([5, 3, 2], 8);
+
+    let result = client.get_owner_weights();
+
+    assert_eq!(result.len(), 3);
+
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        match entry.owner {
+            _ if entry.owner == owner_a => assert_eq!(entry.weight, 5),
+            _ if entry.owner == owner_b => assert_eq!(entry.weight, 3),
+            _ if entry.owner == owner_c => assert_eq!(entry.weight, 2),
+            _ => panic!("unexpected owner in result"),
+        }
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+
+    assert_eq!(sum, client.get_total_weight());
+}
+
+/// After adding and then removing an owner, get_owner_weights must reflect
+/// the current set and the total-weight counter must still match.
+#[test]
+fn get_owner_weights_reflects_owner_changes() {
+    let (env, client, owner_a, owner_b, owner_c, non_owner, token_client) = setup(2);
+
+    // Initial: 3 owners each weight 1, total_weight = 3.
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), 3);
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        assert_eq!(entry.weight, 1);
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+    assert_eq!(sum, 3);
+
+    // Add non_owner as a fourth owner (weight 1 by default).
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &non_owner,
+        &str(&env, "Add fourth owner"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_b, &add_id);
+    client.execute(&owner_c, &add_id);
+
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), 4);
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        assert_eq!(entry.weight, 1);
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+    assert_eq!(sum, 4);
+    assert_eq!(sum, client.get_total_weight());
+}
+
 // ─── Issue #320: total-weight overflow rejection ─────────────────────────────
 
 /// Tests that the overflow-checked arithmetic protecting the total-weight
