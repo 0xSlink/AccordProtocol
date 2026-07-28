@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getSpendingLimit } from "../lib/contract";
 import { createSpendingLimitProposal } from "../lib/submit";
-import { displayToStroops, stroopsToDisplay } from "../lib/soroban";
+import { displayToStroops, stroopsToDisplay, shortenAddr } from "../lib/soroban";
 import { StrKey } from "@stellar/stellar-sdk";
 import type { Owner } from "../types/accord";
 import { useOwnerWeights } from "../hooks/useOwnerWeights";
@@ -249,13 +249,19 @@ export function OwnersPage({
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-zinc-300">{owner.label}</p>
+                    {/* subtle badge retained for quick glance when not loading */}
                     {!weightsLoading && (
                       <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
                         Weight: {weights[owner.address] ?? 1}
                       </span>
                     )}
                   </div>
-                  <p className="font-mono text-xs text-zinc-500">{owner.address}</p>
+                  <p className="font-mono text-xs text-zinc-500">
+                    {shortenAddr(owner.address)}
+                    {!weightsLoading && (
+                      <span className="text-xs text-zinc-400 ml-2">· weight {weights[owner.address] ?? 1}</span>
+                    )}
+                  </p>
                 </div>
               </div>
 

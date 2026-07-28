@@ -159,6 +159,7 @@ export function DashboardPage({
                 approvalWeight={approvalWeight}
                 quorumWeight={quorumWeight}
                 totalWeight={totalWeight}
+                ownerWeights={weights}
               />
             );
           })
