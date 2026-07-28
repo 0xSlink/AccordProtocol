@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 57,
+    "address": 51,
     "nonce": 0,
     "mux_id": 0
   },
@@ -38,6 +38,12 @@
                   "vec": [
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     }
                   ]
                 },
@@ -45,11 +51,109 @@
                   "vec": [
                     {
                       "u32": 1
+                    },
+                    {
+                      "u32": 1
+                    },
+                    {
+                      "u32": 1
                     }
                   ]
                 },
                 {
-                  "u32": 1
+                  "u32": 2
+                },
+                {
+                  "u64": "0"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ],
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "initialize",
+              "args": [
+                {
+                  "vec": [
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                    }
+                  ]
+                },
+                {
+                  "vec": [
+                    {
+                      "u32": 1
+                    },
+                    {
+                      "u32": 1
+                    },
+                    {
+                      "u32": 1
+                    }
+                  ]
+                },
+                {
+                  "u32": 2
+                },
+                {
+                  "u64": "0"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ],
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "initialize",
+              "args": [
+                {
+                  "vec": [
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                    }
+                  ]
+                },
+                {
+                  "vec": [
+                    {
+                      "u32": 1
+                    },
+                    {
+                      "u32": 1
+                    },
+                    {
+                      "u32": 1
+                    }
+                  ]
+                },
+                {
+                  "u32": 2
                 },
                 {
                   "u64": "0"
@@ -104,135 +208,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "720643634"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "to"
-                          },
-                          "val": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "token"
-                          },
-                          "val": {
-                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "string": "fuzz test proposal"
-                },
-                {
-                  "u64": "7384788"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Transfer"
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "vec": [
-                    {
-                      "map": [
-                        {
-                          "key": {
-                            "symbol": "amount"
-                          },
-                          "val": {
-                            "i128": "402081206"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "to"
-                          },
-                          "val": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "token"
-                          },
-                          "val": {
-                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "string": "fuzz test proposal"
-                },
-                {
-                  "u64": "6142397"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Transfer"
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "vec": [
-                    {
-                      "map": [
-                        {
-                          "key": {
-                            "symbol": "amount"
-                          },
-                          "val": {
-                            "i128": "418235672"
+                            "i128": "558711678"
                           }
                         },
                         {
@@ -259,7 +235,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "4132407"
+                  "u64": "1214968"
                 },
                 {
                   "vec": [
@@ -296,7 +272,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "937562"
+                            "i128": "818147531"
                           }
                         },
                         {
@@ -323,7 +299,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6455755"
+                  "u64": "592193"
                 },
                 {
                   "vec": [
@@ -360,7 +336,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "461792068"
+                            "i128": "547508941"
                           }
                         },
                         {
@@ -387,7 +363,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "4628490"
+                  "u64": "802765"
                 },
                 {
                   "vec": [
@@ -424,7 +400,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "867549137"
+                            "i128": "304160377"
                           }
                         },
                         {
@@ -451,7 +427,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3195873"
+                  "u64": "6203254"
                 },
                 {
                   "vec": [
@@ -488,7 +464,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "826850640"
+                            "i128": "123376047"
                           }
                         },
                         {
@@ -515,7 +491,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2616603"
+                  "u64": "7285258"
                 },
                 {
                   "vec": [
@@ -552,7 +528,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "747853538"
+                            "i128": "840672911"
                           }
                         },
                         {
@@ -579,7 +555,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "476712"
+                  "u64": "5426158"
                 },
                 {
                   "vec": [
@@ -616,7 +592,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "52144895"
+                            "i128": "973614765"
                           }
                         },
                         {
@@ -643,7 +619,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "7361526"
+                  "u64": "4192907"
                 },
                 {
                   "vec": [
@@ -680,7 +656,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "76811220"
+                            "i128": "970415371"
                           }
                         },
                         {
@@ -707,7 +683,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "7014816"
+                  "u64": "5020878"
                 },
                 {
                   "vec": [
@@ -744,7 +720,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "217224623"
+                            "i128": "623509553"
                           }
                         },
                         {
@@ -771,7 +747,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "7555900"
+                  "u64": "5350118"
                 },
                 {
                   "vec": [
@@ -808,7 +784,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "230607471"
+                            "i128": "543586020"
                           }
                         },
                         {
@@ -835,7 +811,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2992685"
+                  "u64": "6496416"
                 },
                 {
                   "vec": [
@@ -872,7 +848,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "337579862"
+                            "i128": "674115526"
                           }
                         },
                         {
@@ -899,7 +875,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6047479"
+                  "u64": "965161"
                 },
                 {
                   "vec": [
@@ -936,7 +912,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "527649186"
+                            "i128": "415479701"
                           }
                         },
                         {
@@ -963,7 +939,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "5333266"
+                  "u64": "4395884"
                 },
                 {
                   "vec": [
@@ -1000,7 +976,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "709654835"
+                            "i128": "180820599"
                           }
                         },
                         {
@@ -1027,7 +1003,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3451622"
+                  "u64": "5967169"
                 },
                 {
                   "vec": [
@@ -1064,7 +1040,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "65236916"
+                            "i128": "884685720"
                           }
                         },
                         {
@@ -1091,7 +1067,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "7204986"
+                  "u64": "4278486"
                 },
                 {
                   "vec": [
@@ -1128,7 +1104,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "137570592"
+                            "i128": "803404643"
                           }
                         },
                         {
@@ -1155,7 +1131,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "5191150"
+                  "u64": "2967613"
                 },
                 {
                   "vec": [
@@ -1192,7 +1168,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "611564615"
+                            "i128": "475185879"
                           }
                         },
                         {
@@ -1219,7 +1195,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2216119"
+                  "u64": "6365429"
                 },
                 {
                   "vec": [
@@ -1256,7 +1232,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "50304305"
+                            "i128": "597435037"
                           }
                         },
                         {
@@ -1283,7 +1259,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "4523935"
+                  "u64": "6156175"
                 },
                 {
                   "vec": [
@@ -1320,7 +1296,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "902863860"
+                            "i128": "871708439"
                           }
                         },
                         {
@@ -1347,7 +1323,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2455564"
+                  "u64": "4359771"
                 },
                 {
                   "vec": [
@@ -1384,7 +1360,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "800723491"
+                            "i128": "826236042"
                           }
                         },
                         {
@@ -1411,7 +1387,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6768554"
+                  "u64": "2282531"
                 },
                 {
                   "vec": [
@@ -1448,7 +1424,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "509770298"
+                            "i128": "951236419"
                           }
                         },
                         {
@@ -1475,7 +1451,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6595263"
+                  "u64": "189811"
                 },
                 {
                   "vec": [
@@ -1512,7 +1488,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "194550230"
+                            "i128": "737456411"
                           }
                         },
                         {
@@ -1539,7 +1515,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "72772"
+                  "u64": "7770221"
                 },
                 {
                   "vec": [
@@ -1576,7 +1552,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "919516912"
+                            "i128": "469058118"
                           }
                         },
                         {
@@ -1603,7 +1579,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2093260"
+                  "u64": "4604676"
                 },
                 {
                   "vec": [
@@ -1640,7 +1616,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "835643590"
+                            "i128": "445202122"
                           }
                         },
                         {
@@ -1667,7 +1643,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3522397"
+                  "u64": "5256988"
                 },
                 {
                   "vec": [
@@ -1704,7 +1680,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "943395074"
+                            "i128": "339736996"
                           }
                         },
                         {
@@ -1731,7 +1707,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2158447"
+                  "u64": "7166981"
                 },
                 {
                   "vec": [
@@ -1768,7 +1744,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "924993226"
+                            "i128": "899195503"
                           }
                         },
                         {
@@ -1795,7 +1771,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6681489"
+                  "u64": "2024061"
                 },
                 {
                   "vec": [
@@ -1832,7 +1808,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "457277812"
+                            "i128": "947956235"
                           }
                         },
                         {
@@ -1859,7 +1835,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3804513"
+                  "u64": "5619615"
                 },
                 {
                   "vec": [
@@ -1896,7 +1872,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "863474354"
+                            "i128": "701469003"
                           }
                         },
                         {
@@ -1923,7 +1899,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "1947154"
+                  "u64": "5617182"
                 },
                 {
                   "vec": [
@@ -1960,7 +1936,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "13287705"
+                            "i128": "472198799"
                           }
                         },
                         {
@@ -1987,7 +1963,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "463062"
+                  "u64": "2681192"
                 },
                 {
                   "vec": [
@@ -2024,7 +2000,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "370548220"
+                            "i128": "167879116"
                           }
                         },
                         {
@@ -2051,7 +2027,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6775741"
+                  "u64": "4503212"
                 },
                 {
                   "vec": [
@@ -2088,7 +2064,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "672937286"
+                            "i128": "923024896"
                           }
                         },
                         {
@@ -2115,7 +2091,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6370326"
+                  "u64": "7162129"
                 },
                 {
                   "vec": [
@@ -2152,7 +2128,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "548999493"
+                            "i128": "85620287"
                           }
                         },
                         {
@@ -2179,7 +2155,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "5303396"
+                  "u64": "3201286"
                 },
                 {
                   "vec": [
@@ -2216,7 +2192,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "814754964"
+                            "i128": "237989757"
                           }
                         },
                         {
@@ -2243,7 +2219,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6757439"
+                  "u64": "5779726"
                 },
                 {
                   "vec": [
@@ -2280,7 +2256,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "550924464"
+                            "i128": "129247410"
                           }
                         },
                         {
@@ -2307,7 +2283,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "1745130"
+                  "u64": "6616583"
                 },
                 {
                   "vec": [
@@ -2344,7 +2320,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "236962717"
+                            "i128": "837831924"
                           }
                         },
                         {
@@ -2371,7 +2347,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2797506"
+                  "u64": "462334"
                 },
                 {
                   "vec": [
@@ -2408,7 +2384,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "917688662"
+                            "i128": "627890312"
                           }
                         },
                         {
@@ -2435,7 +2411,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2964911"
+                  "u64": "5746683"
                 },
                 {
                   "vec": [
@@ -2472,7 +2448,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "605952162"
+                            "i128": "799109027"
                           }
                         },
                         {
@@ -2499,7 +2475,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3206333"
+                  "u64": "5456220"
                 },
                 {
                   "vec": [
@@ -2536,7 +2512,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "918565424"
+                            "i128": "79301572"
                           }
                         },
                         {
@@ -2563,7 +2539,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3687736"
+                  "u64": "1736059"
                 },
                 {
                   "vec": [
@@ -2600,7 +2576,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "369430441"
+                            "i128": "896490026"
                           }
                         },
                         {
@@ -2627,7 +2603,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "5085699"
+                  "u64": "4175435"
                 },
                 {
                   "vec": [
@@ -2664,7 +2640,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "53821814"
+                            "i128": "758735813"
                           }
                         },
                         {
@@ -2691,7 +2667,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2545237"
+                  "u64": "1241556"
                 },
                 {
                   "vec": [
@@ -2728,7 +2704,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "363155305"
+                            "i128": "160324982"
                           }
                         },
                         {
@@ -2755,7 +2731,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6075520"
+                  "u64": "4536881"
                 },
                 {
                   "vec": [
@@ -2792,7 +2768,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "380522895"
+                            "i128": "412229131"
                           }
                         },
                         {
@@ -2819,7 +2795,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "2281741"
+                  "u64": "2711256"
                 },
                 {
                   "vec": [
@@ -2856,7 +2832,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "323233717"
+                            "i128": "395151015"
                           }
                         },
                         {
@@ -2883,7 +2859,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "6657386"
+                  "u64": "1357756"
                 },
                 {
                   "vec": [
@@ -2920,7 +2896,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "858090754"
+                            "i128": "27935706"
                           }
                         },
                         {
@@ -2947,7 +2923,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "4618862"
+                  "u64": "4313685"
                 },
                 {
                   "vec": [
@@ -2984,7 +2960,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "281005667"
+                            "i128": "874040247"
                           }
                         },
                         {
@@ -3011,7 +2987,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "36312"
+                  "u64": "3501987"
                 },
                 {
                   "vec": [
@@ -3048,7 +3024,7 @@
                             "symbol": "amount"
                           },
                           "val": {
-                            "i128": "114472845"
+                            "i128": "437134854"
                           }
                         },
                         {
@@ -3075,7 +3051,7 @@
                   "string": "fuzz test proposal"
                 },
                 {
-                  "u64": "3507775"
+                  "u64": "6532587"
                 },
                 {
                   "vec": [
@@ -3090,202 +3066,7 @@
           "sub_invocations": []
         }
       ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "vec": [
-                    {
-                      "map": [
-                        {
-                          "key": {
-                            "symbol": "amount"
-                          },
-                          "val": {
-                            "i128": "451063182"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "to"
-                          },
-                          "val": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIHZK"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "token"
-                          },
-                          "val": {
-                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "string": "fuzz test proposal"
-                },
-                {
-                  "u64": "6505039"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Transfer"
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "vec": [
-                    {
-                      "map": [
-                        {
-                          "key": {
-                            "symbol": "amount"
-                          },
-                          "val": {
-                            "i128": "12131709"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "to"
-                          },
-                          "val": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADKPR2"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "token"
-                          },
-                          "val": {
-                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "string": "fuzz test proposal"
-                },
-                {
-                  "u64": "1646959"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Transfer"
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_proposal",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "vec": [
-                    {
-                      "map": [
-                        {
-                          "key": {
-                            "symbol": "amount"
-                          },
-                          "val": {
-                            "i128": "393790321"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "to"
-                          },
-                          "val": {
-                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMXIK"
-                          }
-                        },
-                        {
-                          "key": {
-                            "symbol": "token"
-                          },
-                          "val": {
-                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "string": "fuzz test proposal"
-                },
-                {
-                  "u64": "1936926"
-                },
-                {
-                  "vec": [
-                    {
-                      "symbol": "Transfer"
-                    }
-                  ]
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [],
-    [],
-    []
+    ]
   ],
   "ledger": {
     "protocol_version": 25,
@@ -3346,6 +3127,162 @@
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "key": {
+                "symbol": "ACTIDS"
+              },
+              "durability": "persistent",
+              "val": {
+                "vec": [
+                  {
+                    "u64": "1"
+                  },
+                  {
+                    "u64": "2"
+                  },
+                  {
+                    "u64": "3"
+                  },
+                  {
+                    "u64": "4"
+                  },
+                  {
+                    "u64": "5"
+                  },
+                  {
+                    "u64": "6"
+                  },
+                  {
+                    "u64": "7"
+                  },
+                  {
+                    "u64": "8"
+                  },
+                  {
+                    "u64": "9"
+                  },
+                  {
+                    "u64": "10"
+                  },
+                  {
+                    "u64": "11"
+                  },
+                  {
+                    "u64": "12"
+                  },
+                  {
+                    "u64": "13"
+                  },
+                  {
+                    "u64": "14"
+                  },
+                  {
+                    "u64": "15"
+                  },
+                  {
+                    "u64": "16"
+                  },
+                  {
+                    "u64": "17"
+                  },
+                  {
+                    "u64": "18"
+                  },
+                  {
+                    "u64": "19"
+                  },
+                  {
+                    "u64": "20"
+                  },
+                  {
+                    "u64": "21"
+                  },
+                  {
+                    "u64": "22"
+                  },
+                  {
+                    "u64": "23"
+                  },
+                  {
+                    "u64": "24"
+                  },
+                  {
+                    "u64": "25"
+                  },
+                  {
+                    "u64": "26"
+                  },
+                  {
+                    "u64": "27"
+                  },
+                  {
+                    "u64": "28"
+                  },
+                  {
+                    "u64": "29"
+                  },
+                  {
+                    "u64": "30"
+                  },
+                  {
+                    "u64": "31"
+                  },
+                  {
+                    "u64": "32"
+                  },
+                  {
+                    "u64": "33"
+                  },
+                  {
+                    "u64": "34"
+                  },
+                  {
+                    "u64": "35"
+                  },
+                  {
+                    "u64": "36"
+                  },
+                  {
+                    "u64": "37"
+                  },
+                  {
+                    "u64": "38"
+                  },
+                  {
+                    "u64": "39"
+                  },
+                  {
+                    "u64": "40"
+                  },
+                  {
+                    "u64": "41"
+                  },
+                  {
+                    "u64": "42"
+                  },
+                  {
+                    "u64": "43"
+                  },
+                  {
+                    "u64": "44"
+                  },
+                  {
+                    "u64": "45"
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
                 "symbol": "OWNERS"
               },
               "durability": "persistent",
@@ -3354,6 +3291,22 @@
                   {
                     "key": {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                    },
+                    "val": {
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                     },
                     "val": {
                       "u32": 1
@@ -3389,6 +3342,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -3412,7 +3373,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "7384788"
+                      "u64": "1214968"
                     }
                   },
                   {
@@ -3449,7 +3410,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "720643634"
+                                    "i128": "558711678"
                                   }
                                 },
                                 {
@@ -3457,7 +3418,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                                   }
                                 },
                                 {
@@ -3488,7 +3449,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -3541,6 +3502,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -3564,7 +3533,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6142397"
+                      "u64": "592193"
                     }
                   },
                   {
@@ -3601,7 +3570,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "402081206"
+                                    "i128": "818147531"
                                   }
                                 },
                                 {
@@ -3609,7 +3578,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                                   }
                                 },
                                 {
@@ -3640,7 +3609,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -3693,6 +3662,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -3716,7 +3693,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "4132407"
+                      "u64": "802765"
                     }
                   },
                   {
@@ -3753,7 +3730,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "418235672"
+                                    "i128": "547508941"
                                   }
                                 },
                                 {
@@ -3761,7 +3738,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
                                   }
                                 },
                                 {
@@ -3792,7 +3769,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -3845,6 +3822,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -3868,7 +3853,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6455755"
+                      "u64": "6203254"
                     }
                   },
                   {
@@ -3905,7 +3890,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "937562"
+                                    "i128": "304160377"
                                   }
                                 },
                                 {
@@ -3913,7 +3898,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
                                   }
                                 },
                                 {
@@ -3944,7 +3929,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -3997,6 +3982,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4020,7 +4013,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "4628490"
+                      "u64": "7285258"
                     }
                   },
                   {
@@ -4057,7 +4050,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "461792068"
+                                    "i128": "123376047"
                                   }
                                 },
                                 {
@@ -4065,7 +4058,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
                                   }
                                 },
                                 {
@@ -4096,7 +4089,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4149,6 +4142,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4172,7 +4173,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3195873"
+                      "u64": "5426158"
                     }
                   },
                   {
@@ -4209,7 +4210,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "867549137"
+                                    "i128": "840672911"
                                   }
                                 },
                                 {
@@ -4217,7 +4218,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
                                   }
                                 },
                                 {
@@ -4248,7 +4249,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4301,6 +4302,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4324,7 +4333,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2616603"
+                      "u64": "4192907"
                     }
                   },
                   {
@@ -4361,7 +4370,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "826850640"
+                                    "i128": "973614765"
                                   }
                                 },
                                 {
@@ -4369,7 +4378,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
                                   }
                                 },
                                 {
@@ -4400,7 +4409,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4453,6 +4462,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4476,7 +4493,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "476712"
+                      "u64": "5020878"
                     }
                   },
                   {
@@ -4513,7 +4530,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "747853538"
+                                    "i128": "970415371"
                                   }
                                 },
                                 {
@@ -4521,7 +4538,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
                                   }
                                 },
                                 {
@@ -4552,7 +4569,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4605,6 +4622,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4628,7 +4653,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "7361526"
+                      "u64": "5350118"
                     }
                   },
                   {
@@ -4665,7 +4690,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "52144895"
+                                    "i128": "623509553"
                                   }
                                 },
                                 {
@@ -4673,7 +4698,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
                                   }
                                 },
                                 {
@@ -4704,7 +4729,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4757,6 +4782,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4780,7 +4813,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "7014816"
+                      "u64": "6496416"
                     }
                   },
                   {
@@ -4817,7 +4850,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "76811220"
+                                    "i128": "543586020"
                                   }
                                 },
                                 {
@@ -4825,7 +4858,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
                                   }
                                 },
                                 {
@@ -4856,7 +4889,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -4909,6 +4942,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -4932,7 +4973,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "7555900"
+                      "u64": "965161"
                     }
                   },
                   {
@@ -4969,7 +5010,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "217224623"
+                                    "i128": "674115526"
                                   }
                                 },
                                 {
@@ -4977,7 +5018,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
                                   }
                                 },
                                 {
@@ -5008,7 +5049,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5061,6 +5102,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5084,7 +5133,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2992685"
+                      "u64": "4395884"
                     }
                   },
                   {
@@ -5121,7 +5170,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "230607471"
+                                    "i128": "415479701"
                                   }
                                 },
                                 {
@@ -5129,7 +5178,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
                                   }
                                 },
                                 {
@@ -5160,7 +5209,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5213,6 +5262,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5236,7 +5293,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6047479"
+                      "u64": "5967169"
                     }
                   },
                   {
@@ -5273,7 +5330,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "337579862"
+                                    "i128": "180820599"
                                   }
                                 },
                                 {
@@ -5281,7 +5338,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
                                   }
                                 },
                                 {
@@ -5312,7 +5369,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5365,6 +5422,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5388,7 +5453,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "5333266"
+                      "u64": "4278486"
                     }
                   },
                   {
@@ -5425,7 +5490,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "527649186"
+                                    "i128": "884685720"
                                   }
                                 },
                                 {
@@ -5433,7 +5498,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
                                   }
                                 },
                                 {
@@ -5464,7 +5529,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5517,6 +5582,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5540,7 +5613,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3451622"
+                      "u64": "2967613"
                     }
                   },
                   {
@@ -5577,7 +5650,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "709654835"
+                                    "i128": "803404643"
                                   }
                                 },
                                 {
@@ -5585,7 +5658,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
                                   }
                                 },
                                 {
@@ -5616,7 +5689,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5669,6 +5742,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5692,7 +5773,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "7204986"
+                      "u64": "6365429"
                     }
                   },
                   {
@@ -5729,7 +5810,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "65236916"
+                                    "i128": "475185879"
                                   }
                                 },
                                 {
@@ -5737,7 +5818,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
                                   }
                                 },
                                 {
@@ -5768,7 +5849,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5821,6 +5902,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5844,7 +5933,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "5191150"
+                      "u64": "6156175"
                     }
                   },
                   {
@@ -5881,7 +5970,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "137570592"
+                                    "i128": "597435037"
                                   }
                                 },
                                 {
@@ -5889,7 +5978,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
                                   }
                                 },
                                 {
@@ -5920,7 +6009,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -5973,6 +6062,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -5996,7 +6093,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2216119"
+                      "u64": "4359771"
                     }
                   },
                   {
@@ -6033,7 +6130,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "611564615"
+                                    "i128": "871708439"
                                   }
                                 },
                                 {
@@ -6041,7 +6138,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
                                   }
                                 },
                                 {
@@ -6072,7 +6169,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6125,6 +6222,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6148,7 +6253,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "4523935"
+                      "u64": "2282531"
                     }
                   },
                   {
@@ -6185,7 +6290,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "50304305"
+                                    "i128": "826236042"
                                   }
                                 },
                                 {
@@ -6193,7 +6298,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTUG7"
                                   }
                                 },
                                 {
@@ -6224,7 +6329,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6277,6 +6382,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6300,7 +6413,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2455564"
+                      "u64": "189811"
                     }
                   },
                   {
@@ -6337,7 +6450,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "902863860"
+                                    "i128": "951236419"
                                   }
                                 },
                                 {
@@ -6345,7 +6458,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABVM7P"
                                   }
                                 },
                                 {
@@ -6376,7 +6489,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6429,6 +6542,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6452,7 +6573,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6768554"
+                      "u64": "7770221"
                     }
                   },
                   {
@@ -6489,7 +6610,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "800723491"
+                                    "i128": "737456411"
                                   }
                                 },
                                 {
@@ -6497,7 +6618,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTUG7"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABXEX7"
                                   }
                                 },
                                 {
@@ -6528,7 +6649,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6581,6 +6702,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6604,7 +6733,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6595263"
+                      "u64": "4604676"
                     }
                   },
                   {
@@ -6641,7 +6770,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "509770298"
+                                    "i128": "469058118"
                                   }
                                 },
                                 {
@@ -6649,7 +6778,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABVM7P"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABY5MP"
                                   }
                                 },
                                 {
@@ -6680,7 +6809,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6733,6 +6862,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6756,7 +6893,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "72772"
+                      "u64": "5256988"
                     }
                   },
                   {
@@ -6793,7 +6930,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "194550230"
+                                    "i128": "445202122"
                                   }
                                 },
                                 {
@@ -6801,7 +6938,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABXEX7"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2VE7"
                                   }
                                 },
                                 {
@@ -6832,7 +6969,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -6885,6 +7022,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -6908,7 +7053,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2093260"
+                      "u64": "7166981"
                     }
                   },
                   {
@@ -6945,7 +7090,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "919516912"
+                                    "i128": "339736996"
                                   }
                                 },
                                 {
@@ -6953,7 +7098,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABY5MP"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4N5P"
                                   }
                                 },
                                 {
@@ -6984,7 +7129,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7037,6 +7182,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7060,7 +7213,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3522397"
+                      "u64": "2024061"
                     }
                   },
                   {
@@ -7097,7 +7250,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "835643590"
+                                    "i128": "899195503"
                                   }
                                 },
                                 {
@@ -7105,7 +7258,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2VE7"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB6FV7"
                                   }
                                 },
                                 {
@@ -7136,7 +7289,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7189,6 +7342,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7212,7 +7373,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2158447"
+                      "u64": "5619615"
                     }
                   },
                   {
@@ -7249,7 +7410,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "943395074"
+                                    "i128": "947956235"
                                   }
                                 },
                                 {
@@ -7257,7 +7418,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4N5P"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBKTY"
                                   }
                                 },
                                 {
@@ -7288,7 +7449,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7341,6 +7502,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7364,7 +7533,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6681489"
+                      "u64": "5617182"
                     }
                   },
                   {
@@ -7401,7 +7570,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "924993226"
+                                    "i128": "701469003"
                                   }
                                 },
                                 {
@@ -7409,7 +7578,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB6FV7"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACDC3I"
                                   }
                                 },
                                 {
@@ -7440,7 +7609,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7493,6 +7662,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7516,7 +7693,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3804513"
+                      "u64": "2681192"
                     }
                   },
                   {
@@ -7553,7 +7730,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "457277812"
+                                    "i128": "472198799"
                                   }
                                 },
                                 {
@@ -7561,7 +7738,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBKTY"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACF2CY"
                                   }
                                 },
                                 {
@@ -7592,7 +7769,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7645,6 +7822,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7668,7 +7853,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "1947154"
+                      "u64": "4503212"
                     }
                   },
                   {
@@ -7705,7 +7890,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "863474354"
+                                    "i128": "167879116"
                                   }
                                 },
                                 {
@@ -7713,7 +7898,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACDC3I"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACHSKI"
                                   }
                                 },
                                 {
@@ -7744,7 +7929,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7797,6 +7982,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7820,7 +8013,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "463062"
+                      "u64": "7162129"
                     }
                   },
                   {
@@ -7857,7 +8050,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "13287705"
+                                    "i128": "923024896"
                                   }
                                 },
                                 {
@@ -7865,7 +8058,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACF2CY"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACILRY"
                                   }
                                 },
                                 {
@@ -7896,7 +8089,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -7949,6 +8142,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -7972,7 +8173,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6775741"
+                      "u64": "3201286"
                     }
                   },
                   {
@@ -8009,7 +8210,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "370548220"
+                                    "i128": "85620287"
                                   }
                                 },
                                 {
@@ -8017,7 +8218,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACHSKI"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACKDZI"
                                   }
                                 },
                                 {
@@ -8048,7 +8249,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8101,6 +8302,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8124,7 +8333,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6370326"
+                      "u64": "5779726"
                     }
                   },
                   {
@@ -8161,7 +8370,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "672937286"
+                                    "i128": "237989757"
                                   }
                                 },
                                 {
@@ -8169,7 +8378,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACILRY"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACM3AY"
                                   }
                                 },
                                 {
@@ -8200,7 +8409,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8253,6 +8462,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8276,7 +8493,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "5303396"
+                      "u64": "6616583"
                     }
                   },
                   {
@@ -8313,7 +8530,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "548999493"
+                                    "i128": "129247410"
                                   }
                                 },
                                 {
@@ -8321,7 +8538,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACKDZI"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACOTII"
                                   }
                                 },
                                 {
@@ -8352,7 +8569,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8405,6 +8622,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8428,7 +8653,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6757439"
+                      "u64": "462334"
                     }
                   },
                   {
@@ -8465,7 +8690,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "814754964"
+                                    "i128": "837831924"
                                   }
                                 },
                                 {
@@ -8473,7 +8698,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACM3AY"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRIXZ"
                                   }
                                 },
                                 {
@@ -8504,7 +8729,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8557,6 +8782,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8580,7 +8813,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "1745130"
+                      "u64": "5746683"
                     }
                   },
                   {
@@ -8617,7 +8850,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "550924464"
+                                    "i128": "627890312"
                                   }
                                 },
                                 {
@@ -8625,7 +8858,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACOTII"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACTA7J"
                                   }
                                 },
                                 {
@@ -8656,7 +8889,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8709,6 +8942,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8732,7 +8973,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2797506"
+                      "u64": "5456220"
                     }
                   },
                   {
@@ -8769,7 +9010,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "236962717"
+                                    "i128": "799109027"
                                   }
                                 },
                                 {
@@ -8777,7 +9018,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRIXZ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACVYGZ"
                                   }
                                 },
                                 {
@@ -8808,7 +9049,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -8861,6 +9102,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -8884,7 +9133,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2964911"
+                      "u64": "1736059"
                     }
                   },
                   {
@@ -8921,7 +9170,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "917688662"
+                                    "i128": "79301572"
                                   }
                                 },
                                 {
@@ -8929,7 +9178,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACTA7J"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACXQOJ"
                                   }
                                 },
                                 {
@@ -8960,7 +9209,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9013,6 +9262,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9036,7 +9293,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3206333"
+                      "u64": "4175435"
                     }
                   },
                   {
@@ -9073,7 +9330,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "605952162"
+                                    "i128": "896490026"
                                   }
                                 },
                                 {
@@ -9081,7 +9338,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACVYGZ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACYJVZ"
                                   }
                                 },
                                 {
@@ -9112,7 +9369,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9165,6 +9422,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9188,7 +9453,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "3687736"
+                      "u64": "1241556"
                     }
                   },
                   {
@@ -9225,7 +9490,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "918565424"
+                                    "i128": "758735813"
                                   }
                                 },
                                 {
@@ -9233,7 +9498,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACXQOJ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC2B5J"
                                   }
                                 },
                                 {
@@ -9264,7 +9529,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9317,6 +9582,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9340,7 +9613,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "5085699"
+                      "u64": "4536881"
                     }
                   },
                   {
@@ -9377,7 +9650,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "369430441"
+                                    "i128": "160324982"
                                   }
                                 },
                                 {
@@ -9385,7 +9658,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACYJVZ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4ZEZ"
                                   }
                                 },
                                 {
@@ -9416,7 +9689,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9469,6 +9742,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9492,7 +9773,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2545237"
+                      "u64": "2711256"
                     }
                   },
                   {
@@ -9529,7 +9810,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "53821814"
+                                    "i128": "412229131"
                                   }
                                 },
                                 {
@@ -9537,7 +9818,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC2B5J"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC6RMJ"
                                   }
                                 },
                                 {
@@ -9568,7 +9849,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9621,6 +9902,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9644,7 +9933,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6075520"
+                      "u64": "1357756"
                     }
                   },
                   {
@@ -9681,7 +9970,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "363155305"
+                                    "i128": "395151015"
                                   }
                                 },
                                 {
@@ -9689,7 +9978,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4ZEZ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBG3K"
                                   }
                                 },
                                 {
@@ -9720,7 +10009,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9773,6 +10062,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9796,7 +10093,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "2281741"
+                      "u64": "4313685"
                     }
                   },
                   {
@@ -9833,7 +10130,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "380522895"
+                                    "i128": "27935706"
                                   }
                                 },
                                 {
@@ -9841,7 +10138,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC6RMJ"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADDOT2"
                                   }
                                 },
                                 {
@@ -9872,7 +10169,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -9925,6 +10222,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -9948,7 +10253,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "6657386"
+                      "u64": "3501987"
                     }
                   },
                   {
@@ -9985,7 +10290,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "323233717"
+                                    "i128": "874040247"
                                   }
                                 },
                                 {
@@ -9993,7 +10298,7 @@
                                     "symbol": "to"
                                   },
                                   "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBG3K"
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADFWKK"
                                   }
                                 },
                                 {
@@ -10024,7 +10329,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -10077,6 +10382,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "approval_weight"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "approvals"
                     },
                     "val": {
@@ -10100,7 +10413,7 @@
                       "symbol": "deadline"
                     },
                     "val": {
-                      "u64": "4618862"
+                      "u64": "6532587"
                     }
                   },
                   {
@@ -10137,311 +10450,7 @@
                                     "symbol": "amount"
                                   },
                                   "val": {
-                                    "i128": "858090754"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "to"
-                                  },
-                                  "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADDOT2"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "token"
-                                  },
-                                  "val": {
-                                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "proposer"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "quorum_weight"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "ready_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "status"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Pending"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PROP"
-                  },
-                  {
-                    "u64": "46"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "approvals"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "category"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deadline"
-                    },
-                    "val": {
-                      "u64": "36312"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "description"
-                    },
-                    "val": {
-                      "string": "fuzz test proposal"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "id"
-                    },
-                    "val": {
-                      "u64": "46"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "kind"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        },
-                        {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": "281005667"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "to"
-                                  },
-                                  "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADFWKK"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "token"
-                                  },
-                                  "val": {
-                                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "proposer"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "quorum_weight"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "ready_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "status"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Pending"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PROP"
-                  },
-                  {
-                    "u64": "47"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "approvals"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "category"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deadline"
-                    },
-                    "val": {
-                      "u64": "3507775"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "description"
-                    },
-                    "val": {
-                      "string": "fuzz test proposal"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "id"
-                    },
-                    "val": {
-                      "u64": "47"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "kind"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        },
-                        {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": "114472845"
+                                    "i128": "437134854"
                                   }
                                 },
                                 {
@@ -10480,463 +10489,7 @@
                       "symbol": "quorum_weight"
                     },
                     "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "ready_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "status"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Pending"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PROP"
-                  },
-                  {
-                    "u64": "48"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "approvals"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "category"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deadline"
-                    },
-                    "val": {
-                      "u64": "6505039"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "description"
-                    },
-                    "val": {
-                      "string": "fuzz test proposal"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "id"
-                    },
-                    "val": {
-                      "u64": "48"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "kind"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        },
-                        {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": "451063182"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "to"
-                                  },
-                                  "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIHZK"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "token"
-                                  },
-                                  "val": {
-                                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "proposer"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "quorum_weight"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "ready_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "status"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Pending"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PROP"
-                  },
-                  {
-                    "u64": "49"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "approvals"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "category"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deadline"
-                    },
-                    "val": {
-                      "u64": "1646959"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "description"
-                    },
-                    "val": {
-                      "string": "fuzz test proposal"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "id"
-                    },
-                    "val": {
-                      "u64": "49"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "kind"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        },
-                        {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": "12131709"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "to"
-                                  },
-                                  "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADKPR2"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "token"
-                                  },
-                                  "val": {
-                                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "proposer"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "quorum_weight"
-                    },
-                    "val": {
-                      "u32": 1
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "ready_at"
-                    },
-                    "val": {
-                      "u64": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "status"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Pending"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PROP"
-                  },
-                  {
-                    "u64": "50"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "approvals"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "category"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deadline"
-                    },
-                    "val": {
-                      "u64": "1936926"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "description"
-                    },
-                    "val": {
-                      "string": "fuzz test proposal"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "id"
-                    },
-                    "val": {
-                      "u64": "50"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "kind"
-                    },
-                    "val": {
-                      "vec": [
-                        {
-                          "symbol": "Transfer"
-                        },
-                        {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": "393790321"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "to"
-                                  },
-                                  "val": {
-                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMXIK"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "token"
-                                  },
-                                  "val": {
-                                    "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "proposer"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "quorum_weight"
-                    },
-                    "val": {
-                      "u32": 1
+                      "u32": 2
                     }
                   },
                   {
@@ -10987,7 +10540,7 @@
                         "symbol": "ACTCNT"
                       },
                       "val": {
-                        "u32": 50
+                        "u32": 45
                       }
                     },
                     {
@@ -11019,7 +10572,7 @@
                         "symbol": "NEXT"
                       },
                       "val": {
-                        "u64": "51"
+                        "u64": "46"
                       }
                     },
                     {
@@ -11027,7 +10580,7 @@
                         "symbol": "THRESH"
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 2
                       }
                     },
                     {
@@ -11040,10 +10593,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "TWEIGHT"
+                        "symbol": "TWGT"
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 3
                       }
                     }
                   ]
@@ -11064,7 +10617,7 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
               "key": {
                 "ledger_key_nonce": {
-                  "nonce": "1033654523790656264"
+                  "nonce": "2032731177588607455"
                 }
               },
               "durability": "temporary",
@@ -11324,26 +10877,6 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
               "key": {
                 "ledger_key_nonce": {
-                  "nonce": "2032731177588607455"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
                   "nonce": "2140788761963629343"
                 }
               },
@@ -11365,26 +10898,6 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "2254425974100219774"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "2260266285686479847"
                 }
               },
               "durability": "temporary",
@@ -11485,26 +10998,6 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "2891388370666955040"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "2917827370713594154"
                 }
               },
               "durability": "temporary",
@@ -11645,26 +11138,6 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "4822409645871993625"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "4837995959683129791"
                 }
               },
               "durability": "temporary",
@@ -11964,26 +11437,6 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
               "key": {
                 "ledger_key_nonce": {
-                  "nonce": "8067048471933141837"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "ledger_key_nonce": {
                   "nonce": "8077058277077262192"
                 }
               },
@@ -12085,6 +11538,46 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "9219847003023114248"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "1033654523790656264"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4837995959683129791"
                 }
               },
               "durability": "temporary",
@@ -12266,5 +11759,116 @@
       }
     ]
   },
-  "events": []
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "created"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "category"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "symbol": "Transfer"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "id"
+                  },
+                  "val": {
+                    "u64": "45"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "proposer"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "quorum_weight"
+                  },
+                  "val": {
+                    "u32": 2
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "threshold"
+                  },
+                  "val": {
+                    "u32": 2
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "total_weight_at_creation"
+                  },
+                  "val": {
+                    "u32": 3
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "transfers"
+                  },
+                  "val": {
+                    "vec": [
+                      {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "amount"
+                            },
+                            "val": {
+                              "i128": "437134854"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "to"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADH6C2"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "token"
+                            },
+                            "val": {
+                              "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
 }
