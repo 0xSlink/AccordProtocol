@@ -1120,6 +1120,7 @@ fn approve_returns_arithmetic_error_on_overflow() {
         description: str(&env, "Overflow approvals"),
         deadline: DEADLINE,
         approvals: u32::MAX,
+        approval_weight: u32::MAX,
         status: ProposalStatus::Pending,
         kind: ProposalKind::Transfer(t(
             &env,
@@ -1478,6 +1479,113 @@ fn revoke_rejects_when_not_previously_approved() {
         client.try_revoke(&owner_a, &id),
         Err(Ok(ContractError::NotApproved))
     );
+}
+
+// ─── approval_weight ─────────────────────────────────────────────────────
+
+/// An owner with weight greater than one must increase approval_weight by
+/// that owner's full weight on approve and decrease it by that owner's full
+/// weight on revoke, confirming the field tracks cumulative weight independently
+/// of the flat approvals counter.
+#[test]
+fn approval_weight_tracks_weighted_approve_and_revoke() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let owner_a = Address::generate(&env);
+    let owner_b = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_client = token::Client::new(&env, &token_id.address());
+    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner_a.clone());
+    owners.push_back(owner_b.clone());
+
+    // Weights: Owner A = 4, Owner B = 2. Quorum = 5.
+    let mut weights = Vec::new(&env);
+    weights.push_back(4);
+    weights.push_back(2);
+    client.initialize(&owners, &weights, &5, &0);
+
+    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
+        &str(&env, "Weighted approval_weight"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Initially zero.
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 0);
+    assert_eq!(p.approvals, 0);
+
+    // Owner A (weight 4) approves → approval_weight = 4.
+    client.approve(&owner_a, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 4);
+    assert_eq!(p.approvals, 4);
+
+    // Owner A revokes → approval_weight = 0.
+    client.revoke(&owner_a, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 0);
+    assert_eq!(p.approvals, 0);
+}
+
+/// Multiple owners with different weights approving in sequence must produce
+/// the correct cumulative approval_weight at each step.
+#[test]
+fn approval_weight_accumulates_correctly_with_multiple_weighted_approvers() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) =
+        setup_three_owner_weighted([5, 3, 2], 8);
+
+    let id = client.create_proposal(
+        &owner_a,
+        &t(
+            &env,
+            &Address::generate(&env),
+            1_000_000,
+            &token_client.address,
+        ),
+        &str(&env, "Multi-weight approval_weight"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Owner A (weight 5) → approval_weight = 5.
+    client.approve(&owner_a, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 5);
+
+    // Owner B (weight 3) → approval_weight = 8.
+    client.approve(&owner_b, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 8);
+
+    // Owner C (weight 2) → approval_weight = 10.
+    client.approve(&owner_c, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 10);
+
+    // Revoke B (weight 3) → approval_weight = 7.
+    client.revoke(&owner_b, &id);
+    let p = client.get_proposal(&id);
+    assert_eq!(p.approval_weight, 7);
 }
 
 // ─── Revoke → Re-approve ──────────────────────────────────────────────────────
@@ -5478,6 +5586,72 @@ fn get_owner_weight_returns_owner_not_found_for_non_owner() {
     // Contrast: genuine owners return their actual stored weight.
     assert_eq!(client.get_owner_weight(&owner_a), 1);
     assert_eq!(client.get_owner_weight(&owner_b), 1);
+}
+
+// ─── get_owner_weights ────────────────────────────────────────────────────
+
+/// Confirms get_owner_weights returns every owner with the correct weight
+/// for a multisig with several owners holding different weights, and that
+/// the sum of returned weights matches the total-weight counter.
+#[test]
+fn get_owner_weights_returns_all_owners_with_correct_weights() {
+    let (env, client, owner_a, owner_b, owner_c, token_client) =
+        setup_three_owner_weighted([5, 3, 2], 8);
+
+    let result = client.get_owner_weights();
+
+    assert_eq!(result.len(), 3);
+
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        match entry.owner {
+            _ if entry.owner == owner_a => assert_eq!(entry.weight, 5),
+            _ if entry.owner == owner_b => assert_eq!(entry.weight, 3),
+            _ if entry.owner == owner_c => assert_eq!(entry.weight, 2),
+            _ => panic!("unexpected owner in result"),
+        }
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+
+    assert_eq!(sum, client.get_total_weight());
+}
+
+/// After adding and then removing an owner, get_owner_weights must reflect
+/// the current set and the total-weight counter must still match.
+#[test]
+fn get_owner_weights_reflects_owner_changes() {
+    let (env, client, owner_a, owner_b, owner_c, non_owner, token_client) = setup(2);
+
+    // Initial: 3 owners each weight 1, total_weight = 3.
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), 3);
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        assert_eq!(entry.weight, 1);
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+    assert_eq!(sum, 3);
+
+    // Add non_owner as a fourth owner (weight 1 by default).
+    let add_id = client.create_add_owner_proposal(
+        &owner_a,
+        &non_owner,
+        &str(&env, "Add fourth owner"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &add_id);
+    client.approve(&owner_b, &add_id);
+    client.execute(&owner_c, &add_id);
+
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), 4);
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        assert_eq!(entry.weight, 1);
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+    assert_eq!(sum, 4);
+    assert_eq!(sum, client.get_total_weight());
 }
 
 // ─── Issue #320: total-weight overflow rejection ─────────────────────────────

@@ -72,6 +72,7 @@ pub struct Proposal {
     pub description: String,
     pub deadline: u64,
     pub approvals: u32,
+    pub approval_weight: u32,
     pub status: ProposalStatus,
     pub kind: ProposalKind,
     pub ready_at: u64,
@@ -85,6 +86,13 @@ pub struct ProposalApprovalProgress {
     pub approval_weight: u32,
     pub quorum_weight: u32,
     pub total_weight: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OwnerWeight {
+    pub owner: Address,
+    pub weight: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1034,6 +1042,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::Transfer(transfers.clone()),
             ready_at: 0,
@@ -1121,6 +1130,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::AddOwner(new_owner, weight),
             ready_at: 0,
@@ -1193,6 +1203,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::SetSpendingLimit(owner, token, limit),
             ready_at: 0,
@@ -1291,6 +1302,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::ChangeOwnerWeight(target_owner, new_weight),
             ready_at: 0,
@@ -1402,6 +1414,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::RemoveOwner(owner_to_remove),
             ready_at: 0,
@@ -1480,6 +1493,7 @@ impl AccordContract {
             description,
             deadline,
             approvals: 0,
+            approval_weight: 0,
             status: ProposalStatus::Pending,
             kind: ProposalKind::ChangeThreshold(new_threshold),
             ready_at: 0,
@@ -1540,6 +1554,11 @@ impl AccordContract {
             .checked_add(weight)
             .ok_or(ContractError::ArithmeticError)?;
 
+        proposal.approval_weight = proposal
+            .approval_weight
+            .checked_add(weight)
+            .ok_or(ContractError::ArithmeticError)?;
+
         // Record the timestamp when the proposal first crosses the threshold.
         if proposal.ready_at == 0 && proposal.approvals >= proposal.quorum_weight {
             proposal.ready_at = env.ledger().timestamp();
@@ -1592,6 +1611,12 @@ impl AccordContract {
             .approvals
             .checked_sub(weight)
             .ok_or(ContractError::ArithmeticError)?;
+
+        proposal.approval_weight = proposal
+            .approval_weight
+            .checked_sub(weight)
+            .ok_or(ContractError::ArithmeticError)?;
+
         proposal.status = derive_status(&env, &proposal);
         write_proposal(&env, &proposal);
 
@@ -2038,6 +2063,19 @@ impl AccordContract {
     /// Returns all current owners.
     pub fn get_owners(env: Env) -> Result<Vec<Address>, ContractError> {
         Ok(read_owners_map(&env)?.keys())
+    }
+
+    /// Returns every current owner's address paired with their voting weight,
+    /// in a single call. The sum of the returned weights equals the current
+    /// total-weight counter. Read-only; no authorization required.
+    pub fn get_owner_weights(env: Env) -> Result<Vec<OwnerWeight>, ContractError> {
+        let owners = read_owners_map(&env)?;
+        let mut result = Vec::new(&env);
+        for owner in owners.keys().iter() {
+            let weight = owners.get(owner.clone()).unwrap_or(0);
+            result.push_back(OwnerWeight { owner, weight });
+        }
+        Ok(result)
     }
 
     /// Returns the spending limit for an (owner, token) pair, or `None` if no
