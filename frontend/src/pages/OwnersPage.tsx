@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getSpendingLimit } from "../lib/contract";
 import { createSpendingLimitProposal } from "../lib/submit";
-import { displayToStroops, stroopsToDisplay } from "../lib/soroban";
+import { displayToStroops, stroopsToDisplay, shortenAddr } from "../lib/soroban";
 import { StrKey } from "@stellar/stellar-sdk";
 import type { Owner } from "../types/accord";
 import { useOwnerWeights } from "../hooks/useOwnerWeights";
@@ -184,7 +184,7 @@ export function OwnersPage({
           </div>
         ) : (
           <div>
-            <div className="flex h-6 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 w-full mb-3">
+            <div role="region" aria-label={`Voting weight distribution across ${ownerAddresses.length} owners, total weight ${totalWeight}`} className="flex h-6 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 w-full mb-3">
               {ownerAddresses.map((addr, idx) => {
                 const weight = weights[addr] ?? 1;
                 const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
@@ -200,6 +200,14 @@ export function OwnersPage({
                     title={titleStr}
                     style={{ width: `${pct}%` }}
                     className={`${CHART_COLORS[idx % CHART_COLORS.length]} h-full transition-all duration-300 relative group cursor-pointer hover:brightness-110`}
+                    tabIndex={0}
+                    role="img"
+                    aria-label={titleStr}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                      }
+                    }}
                   />
                 );
               })}
@@ -210,9 +218,10 @@ export function OwnersPage({
                 const weight = weights[addr] ?? 1;
                 const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
                 const ownerInfo = owners.find((o) => o.address === addr) || { label: `Signer ${idx + 1}`, address: addr };
+                const legendLabel = `${ownerInfo.label} ${addr.slice(0,6)}…${addr.slice(-4)}: ${weight} weight (${pct.toFixed(0)}%)`;
                 return (
-                  <div key={addr} className="flex items-center gap-1.5 text-xs text-zinc-400">
-                    <span className={`w-2.5 h-2.5 rounded-full ${CHART_COLORS[idx % CHART_COLORS.length]}`} />
+                  <div key={addr} className="flex items-center gap-1.5 text-xs text-zinc-400" aria-label={legendLabel}>
+                    <span aria-hidden className={`w-2.5 h-2.5 rounded-full ${CHART_COLORS[idx % CHART_COLORS.length]}`} />
                     <span className="font-medium text-zinc-300">{ownerInfo.label}</span>
                     <span className="font-mono text-zinc-500">({addr.slice(0, 6)}…{addr.slice(-4)})</span>
                     <span className="font-medium text-zinc-300">({weight} w, {pct.toFixed(0)}%)</span>
@@ -240,13 +249,19 @@ export function OwnersPage({
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-zinc-300">{owner.label}</p>
+                    {/* subtle badge retained for quick glance when not loading */}
                     {!weightsLoading && (
                       <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
                         Weight: {weights[owner.address] ?? 1}
                       </span>
                     )}
                   </div>
-                  <p className="font-mono text-xs text-zinc-500">{owner.address}</p>
+                  <p className="font-mono text-xs text-zinc-500">
+                    {shortenAddr(owner.address)}
+                    {!weightsLoading && (
+                      <span className="text-xs text-zinc-400 ml-2">· weight {weights[owner.address] ?? 1}</span>
+                    )}
+                  </p>
                 </div>
               </div>
 
@@ -295,6 +310,9 @@ export function OwnersPage({
           <button
             type="button"
             onClick={() => setShowForm(!showForm)}
+            aria-expanded={showForm}
+            aria-controls="spending-limit-form"
+            aria-label={showForm ? "Close spending limit form" : "Open spending limit form"}
             className="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
           >
             {showForm ? "Cancel" : "Set Spending Limit"}
@@ -302,39 +320,43 @@ export function OwnersPage({
         </div>
 
         {showForm && (
-          <div className="space-y-4 border-t border-zinc-800 pt-4">
+          <div id="spending-limit-form" className="space-y-4 border-t border-zinc-800 pt-4">
             <p className="text-xs text-zinc-400">
               Propose a per-owner, per-token spending limit. Set to 0 to block spending for that token.
             </p>
 
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Owner Address</label>
+              <label htmlFor="sl-owner" className="text-xs text-zinc-400 block mb-1.5">Owner Address</label>
               <input
+                id="sl-owner"
                 value={slOwner}
                 onChange={(e) => setSlOwner(e.target.value)}
                 placeholder="G..."
+                aria-label="Owner Stellar address"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-mono placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
 
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="text-xs text-zinc-400 block mb-1.5">
+                <label htmlFor="sl-amount" className="text-xs text-zinc-400 block mb-1.5">
                   Limit Amount
                 </label>
                 <input
+                  id="sl-amount"
                   value={slAmount}
                   onChange={(e) => setSlAmount(e.target.value)}
                   placeholder="0.00"
                   type="number"
                   min="0"
                   step="any"
+                  aria-label="Spending limit amount"
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
                 />
               </div>
               <div className="w-28">
                 <label className="text-xs text-zinc-400 block mb-1.5">Token</label>
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-3 gap-1" role="group" aria-label="Token selector">
                   {TOKEN_SYMBOLS.map((symbol) => {
                     const active = slToken === symbol;
                     return (
@@ -343,6 +365,7 @@ export function OwnersPage({
                         type="button"
                         onClick={() => setSlToken(symbol)}
                         aria-pressed={active}
+                        aria-label={`Select token ${symbol}`}
                         className={`rounded-lg border px-1.5 py-2 text-xs font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none ${
                           active
                             ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
@@ -358,22 +381,26 @@ export function OwnersPage({
             </div>
 
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Description</label>
+              <label htmlFor="sl-description" className="text-xs text-zinc-400 block mb-1.5">Description</label>
               <input
+                id="sl-description"
                 value={slDescription}
                 onChange={(e) => setSlDescription(e.target.value)}
                 placeholder="Reason for spending limit"
                 maxLength={300}
+                aria-label="Spending limit description"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
 
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Deadline</label>
+              <label htmlFor="sl-deadline" className="text-xs text-zinc-400 block mb-1.5">Deadline</label>
               <input
+                id="sl-deadline"
                 type="date"
                 value={slDeadline}
                 onChange={(e) => setSlDeadline(e.target.value)}
+                aria-label="Spending limit deadline"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
@@ -387,6 +414,7 @@ export function OwnersPage({
             <button
               type="button"
               onClick={handleCreateSpendingLimit}
+              aria-label="Create spending limit proposal"
               disabled={slSubmitting || !walletAddress}
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
             >

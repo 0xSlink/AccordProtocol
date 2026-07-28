@@ -33,7 +33,7 @@ type Props = {
   triggerRef?: RefObject<HTMLButtonElement | null>;
 };
 
-type ProposalStep = "type" | "form" | "preview";
+type ProposalStep = "type" | "form" | "preview" | "confirm";
 
 type FormType = ProposalKind;
 
@@ -458,6 +458,12 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
   }
 
   async function handleConfirmSubmit() {
+    // If we're previewing a weight-change proposal, move to the final confirm step
+    if (formType === "change_owner_weight" && step === "preview") {
+      setStep("confirm");
+      return;
+    }
+
     const data = getValidatedForm();
     if (!data) return;
 
@@ -516,6 +522,93 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Confirmation step for weight-change proposals
+  function renderConfirm() {
+    if (formType !== "change_owner_weight") return null;
+    const target = selectedOwner;
+    const oldWeight = currentWeights[target] ?? 1;
+    const newWeight = parseInt(newWeightInput, 10);
+    const currentTotal = totalWeight;
+    const resultingTotal = currentTotal - oldWeight + (isNaN(newWeight) ? 0 : newWeight);
+    const currentQuorum = quorumWeight;
+    // If quorum is expressed as count, leave it; otherwise it may already be weight
+    const resultingQuorum = currentQuorum; // Assuming quorum remains same weight in this implementation
+
+    return (
+      <>
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-zinc-200">Confirm Weight Change</h3>
+          <dl className="space-y-3 rounded-lg border border-zinc-700 bg-zinc-800/50 p-3">
+            <div>
+              <dt className="text-xs text-zinc-500">Target Owner</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono break-all">{target}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Current Owner Weight</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{oldWeight}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Proposed New Weight</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{isNaN(newWeight) ? "—" : newWeight}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Current Total Weight</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{currentTotal}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Resulting Total Weight</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{resultingTotal}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Current Quorum Requirement</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{currentQuorum}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Resulting Quorum Requirement</dt>
+              <dd className="mt-1 text-sm text-zinc-200 font-mono">{resultingQuorum}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Description</dt>
+              <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-200">{description.trim()}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-zinc-500">Deadline</dt>
+              <dd className="mt-1 text-sm text-zinc-200">{formatDeadlineDate(deadline)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        {error && (
+          <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => setStep("form")}
+            disabled={submitting}
+            className="flex-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmSubmit}
+            disabled={submitting || !walletAddress}
+            title={
+              walletAddress ? undefined : "Connect your Freighter wallet to submit"
+            }
+            className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+          >
+            {submitting ? "Submitting…" : "Confirm & Submit"}
+          </button>
+        </div>
+      </>
+    );
   }
 
   // ─── Render steps ────────────────────────────────────────────────────────
