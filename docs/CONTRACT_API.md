@@ -53,7 +53,7 @@ Scan this table when you hit an error code and need a fast answer. Errors develo
 | 19 `DuplicateOwner` | Duplicate address in owners/approvers or add-owner list. | Deduplicate addresses before submitting. |
 | 24 `WouldBreakThreshold` | Removing an owner would leave fewer owners than threshold (flat count checks). | Lower threshold first, then remove the owner. |
 | 34 `WouldBreakQuorum` | Weight change or owner removal would leave total weight below threshold or leave an active proposal un-quorumable. | Lower threshold first or wait for active proposals to finish before modifying weights. |
-| 25 `OwnerNotFound` | Address to remove is not in the current owner list. | Verify with `is_owner` / `get_owners` first. |
+| 25 `OwnerNotFound` | Address to remove or change weight for is not in the current owner list. | Verify with `is_owner` / `get_owners` first. |
 | 20 `ArithmeticError` | Integer overflow/underflow guard tripped (rare). | Contact maintainers; should not occur in normal use. |
 | 32 `TargetOwnerNoLongerExists` | The target of a `ChangeOwnerWeight` proposal is no longer an owner at execution time. | This is an edge case; create a new proposal. |
 | 33 `AlreadyMigrated` | `migrate_to_weighted_governance` was called on a contract that already has weighted governance. | Do not re-migrate; the contract is already up-to-date. |

@@ -193,6 +193,15 @@ pub struct SetSpendingLimitExecutedEvent {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct OwnerWeightChangedEvent {
+    pub owner: Address,
+    pub old_weight: u32,
+    pub new_weight: u32,
+    pub new_total_weight: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct GovernanceMigratedEvent {
     pub owner_count: u32,
     pub total_weight: u32,
@@ -239,7 +248,8 @@ pub enum ContractError {
     InvalidWeightsLength = 31,
     SingleOwnerWeightCapExceeded = 32,
     TargetOwnerNoLongerExists = 33,
-    AlreadyMigrated = 34,
+    WouldBreakQuorum = 34,
+    AlreadyMigrated = 35,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -1059,6 +1069,21 @@ impl AccordContract {
         proposer: Address,
         new_owner: Address,
         weight: u32,
+        description: String,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner_and_weight(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        let owners = read_owners_map(&env)?;
+        if owners.contains_key(new_owner.clone()) {
+            return Err(ContractError::DuplicateOwner);
+        }
+
+        if owners.len() >= MAX_OWNERS {
+            return Err(ContractError::InvalidOwners);
+        }
 
         if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(&weight) {
             return Err(ContractError::InvalidWeight);
@@ -1070,23 +1095,6 @@ impl AccordContract {
             .ok_or(ContractError::ArithmeticError)?;
         if !owner_weight_within_cap(&env, weight, resulting_total) {
             return Err(ContractError::SingleOwnerWeightCapExceeded);
-        }
-
-        description: String,
-        deadline: u64,
-    ) -> Result<u64, ContractError> {
-        proposer.require_auth();
-        require_owner_and_weight(&env, &proposer)?;
-        require_not_frozen(&env)?;
-
-
-        let owners = read_owners_map(&env)?;
-        if owners.contains_key(new_owner.clone()) {
-            return Err(ContractError::DuplicateOwner);
-        }
-
-        if owners.len() >= MAX_OWNERS {
-            return Err(ContractError::InvalidOwners);
         }
 
         if description.is_empty() {
@@ -1862,6 +1870,16 @@ impl AccordContract {
                 owners.set(target_owner.clone(), *new_weight);
                 env.storage().persistent().set(&owners_key(), &owners);
                 write_total_weight(&env, new_total);
+
+                env.events().publish(
+                    (symbol_short!("c_wgt"),),
+                    OwnerWeightChangedEvent {
+                        owner: target_owner.clone(),
+                        old_weight,
+                        new_weight: *new_weight,
+                        new_total_weight: new_total,
+                    },
+                );
             }
         }
 
