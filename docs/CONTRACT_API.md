@@ -238,6 +238,16 @@ Returns the approval threshold.
 
 ---
 
+## `get_total_weight`
+
+```rust
+fn get_total_weight(env: Env) -> u32
+```
+
+Returns the current total-weight counter — the sum of all registered owners' individual voting weights. This value is updated automatically when owners are added, removed, or re-weighted. Read-only; no authorization required.
+
+---
+
 ## `get_required_quorum_weight`
 
 ```rust
@@ -269,6 +279,18 @@ fn is_owner(env: Env, address: Address) -> bool
 ```
 
 Returns `true` if `address` is a current owner.
+
+---
+
+## `get_owner_weight`
+
+```rust
+fn get_owner_weight(env: Env, owner: Address) -> Result<u32, ContractError>
+```
+
+Returns the current voting weight for `owner`. The weight reflects the owner's individual contribution to quorum calculations. Read-only; no authorization required.
+
+**Errors:** `NotInitialized`, `OwnerNotFound` (if `owner` is not a current owner)
 
 ---
 
