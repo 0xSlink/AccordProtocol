@@ -97,6 +97,13 @@ pub struct OwnerWeight {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct SpendingLimitEntry {
+    pub token: Address,
+    pub limit: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct ProposalCreatedEvent {
     pub id: u64,
     pub proposer: Address,
@@ -308,6 +315,10 @@ fn frozen_key() -> Symbol {
 
 fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
     (symbol_short!("SLIMIT"), owner.clone(), token.clone())
+}
+
+fn owner_spending_limits_key(owner: &Address) -> (Symbol, Address) {
+    (symbol_short!("OSLIM"), owner.clone())
 }
 
 fn total_weight_key() -> Symbol {
@@ -551,6 +562,44 @@ fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128
     let key = spending_limit_key(owner, token);
     env.storage().persistent().set(&key, &limit);
     bump_persistent(env, &key);
+}
+
+fn read_owner_spending_limits(env: &Env, owner: &Address) -> Vec<SpendingLimitEntry> {
+    let key = owner_spending_limits_key(owner);
+    let limits: Vec<SpendingLimitEntry> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    limits
+}
+
+fn write_owner_spending_limits(env: &Env, owner: &Address, limits: &Vec<SpendingLimitEntry>) {
+    let key = owner_spending_limits_key(owner);
+    env.storage().persistent().set(&key, limits);
+    bump_persistent(env, &key);
+}
+
+fn upsert_owner_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128) {
+    let mut limits = read_owner_spending_limits(env, owner);
+    let mut updated = false;
+    for idx in 0..limits.len() {
+        let mut entry = limits.get(idx).unwrap();
+        if entry.token == *token {
+            entry.limit = limit;
+            limits.set(idx, entry);
+            updated = true;
+            break;
+        }
+    }
+
+    if !updated {
+        limits.push_back(SpendingLimitEntry {
+            token: token.clone(),
+            limit,
+        });
+    }
+
+    write_owner_spending_limits(env, owner, &limits);
 }
 
 fn read_spent_tracker(env: &Env, owner: &Address, token: &Address) -> SpentTracker {
@@ -1836,6 +1885,7 @@ impl AccordContract {
             ProposalKind::SetSpendingLimit(owner, token, limit) => {
                 let prev_limit = read_spending_limit(&env, owner, token);
                 write_spending_limit(&env, owner, token, *limit);
+                upsert_owner_spending_limit(&env, owner, token, *limit);
                 // Reset cumulative spending tracking when a new limit is set.
                 let now = env.ledger().timestamp();
                 write_spent_tracker(
@@ -2096,6 +2146,12 @@ impl AccordContract {
     /// limit is set (the owner is unrestricted for that token).
     pub fn get_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
         read_spending_limit(&env, &owner, &token)
+    }
+
+    /// Returns every configured spending-limit entry for `owner`, as a list of
+    /// `(token, limit)` pairs. Owners with no configured limits receive an empty list.
+    pub fn get_owner_spending_limits(env: Env, owner: Address) -> Vec<SpendingLimitEntry> {
+        read_owner_spending_limits(&env, &owner)
     }
 
     /// Returns the remaining spending limit (limit minus cumulative spent within

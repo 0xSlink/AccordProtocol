@@ -3572,6 +3572,93 @@ fn spending_limit_different_tokens_independent() {
 }
 
 #[test]
+fn get_owner_spending_limits_returns_all_configured_tokens_for_owner() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let token_admin2 = Address::generate(&env);
+    let token_id2 = env.register_stellar_asset_contract_v2(token_admin2);
+    let token2_client = token::Client::new(&env, &token_id2.address());
+
+    let limit_id_1 = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &1_000_000,
+        &str(&env, "Limit token 1"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id_1);
+    client.approve(&owner_b, &limit_id_1);
+    client.execute(&owner_c, &limit_id_1);
+
+    let limit_id_2 = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token2_client.address,
+        &2_000_000,
+        &str(&env, "Limit token 2"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &limit_id_2);
+    client.approve(&owner_b, &limit_id_2);
+    client.execute(&owner_c, &limit_id_2);
+
+    let limits = client.get_owner_spending_limits(&owner_a);
+    assert_eq!(limits.len(), 2);
+
+    let mut seen = Vec::new(&env);
+    for entry in limits.iter() {
+        seen.push_back((entry.token, entry.limit));
+    }
+
+    assert!(seen.contains(&(token_client.address.clone(), 1_000_000_i128)));
+    assert!(seen.contains(&(token2_client.address.clone(), 2_000_000_i128)));
+}
+
+#[test]
+fn get_owner_spending_limits_returns_empty_for_owner_without_limits() {
+    let (_, client, owner_a, _, _, _, token_client) = setup(2);
+    let limits = client.get_owner_spending_limits(&owner_a);
+    assert!(limits.is_empty());
+    assert_eq!(client.get_spending_limit(&owner_a, &token_client.address), None);
+}
+
+#[test]
+fn get_owner_spending_limits_updates_existing_limit_without_duplicates() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+
+    let first_limit_id = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &1_000_000,
+        &str(&env, "Initial limit"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &first_limit_id);
+    client.approve(&owner_b, &first_limit_id);
+    client.execute(&owner_c, &first_limit_id);
+
+    let update_limit_id = client.create_spending_limit_proposal(
+        &owner_a,
+        &owner_a,
+        &token_client.address,
+        &2_500_000,
+        &str(&env, "Updated limit"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &update_limit_id);
+    client.approve(&owner_b, &update_limit_id);
+    client.execute(&owner_c, &update_limit_id);
+
+    let limits = client.get_owner_spending_limits(&owner_a);
+    assert_eq!(limits.len(), 1);
+    let entry = limits.get(0).unwrap();
+    assert_eq!(entry.token, token_client.address);
+    assert_eq!(entry.limit, 2_500_000_i128);
+}
+
+#[test]
 fn get_remaining_spending_limit_no_limit() {
     let (_, client, owner_a, _, _, _, token_client) = setup(2);
     assert_eq!(
