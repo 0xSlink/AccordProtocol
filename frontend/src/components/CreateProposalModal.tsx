@@ -5,8 +5,16 @@ import {
   createRemoveOwnerProposal,
   createChangeThresholdProposal,
   estimateCreateProposalFee,
+  createChangeOwnerWeightProposal,
 } from "../lib/submit";
-import { getOwners, getThreshold } from "../lib/contract";
+import {
+  getOwners,
+  getThreshold,
+  getOwnerWeight,
+  getTotalWeight,
+  getRequiredQuorumWeight,
+  getWeightCapPct,
+} from "../lib/contract";
 import { displayToStroops } from "../lib/soroban";
 import { StrKey } from "@stellar/stellar-sdk";
 import type { ProposalKind } from "../types/accord";
@@ -59,13 +67,22 @@ type ChangeThresholdFormData = {
   deadlineUnix: bigint;
 };
 
-type ValidatedFormData = TransferFormData | AddOwnerFormData | RemoveOwnerFormData | ChangeThresholdFormData;
+type ChangeOwnerWeightFormData = {
+  type: "change_owner_weight";
+  targetOwner: string;
+  newWeight: number;
+  description: string;
+  deadlineUnix: bigint;
+};
+
+type ValidatedFormData = TransferFormData | AddOwnerFormData | RemoveOwnerFormData | ChangeThresholdFormData | ChangeOwnerWeightFormData;
 
 const FORM_OPTIONS: { kind: FormType; label: string }[] = [
   { kind: "transfer", label: "Transfer" },
   { kind: "add_owner", label: "Add Owner" },
   { kind: "remove_owner", label: "Remove Owner" },
   { kind: "change_threshold", label: "Change Threshold" },
+  { kind: "change_owner_weight", label: "Propose Weight Change" },
 ];
 
 function truncateAddress(address: string | null) {
@@ -126,6 +143,13 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
   const [currentThreshold, setCurrentThreshold] = useState<number>(1);
   const [totalOwners, setTotalOwners] = useState<number>(1);
 
+  // Proposal Weight Change fields
+  const [newWeightInput, setNewWeightInput] = useState("");
+  const [currentWeights, setCurrentWeights] = useState<Record<string, number>>({});
+  const [totalWeight, setTotalWeight] = useState<number>(0);
+  const [quorumWeight, setQuorumWeight] = useState<number>(0);
+  const [weightCapPct, setWeightCapPct] = useState<number>(50);
+
   // Fee
   const [feeEstimate, setFeeEstimate] = useState<number | null>(null);
   const [feeLoading, setFeeLoading] = useState(false);
@@ -136,30 +160,70 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
 
   // Load contract data for governance proposals
   useEffect(() => {
-    if (formType === "remove_owner" || formType === "change_threshold") {
-      getOwners()
-        .then(setAvailableOwners)
-        .catch(() => setAvailableOwners([]));
+    async function loadData() {
+      try {
+        const ownerAddrs = await getOwners();
+        setAvailableOwners(ownerAddrs);
+        setTotalOwners(ownerAddrs.length);
+
+        const thresh = await getThreshold();
+        setCurrentThreshold(thresh);
+        setQuorumWeight(thresh);
+
+        try {
+          const cap = await getWeightCapPct();
+          setWeightCapPct(cap);
+        } catch (e) {
+          console.warn("Failed to fetch weight cap", e);
+        }
+
+        try {
+          const totalW = await getTotalWeight();
+          setTotalWeight(totalW);
+        } catch (e) {
+          console.warn("Failed to fetch total weight", e);
+        }
+
+        try {
+          const rq = await getRequiredQuorumWeight();
+          setQuorumWeight(rq);
+        } catch (e) {
+          console.warn("Failed to fetch quorum weight", e);
+        }
+
+        const weightMap: Record<string, number> = {};
+        let computedSum = 0;
+        for (const addr of ownerAddrs) {
+          try {
+            const w = await getOwnerWeight(addr);
+            weightMap[addr] = w;
+            computedSum += w;
+          } catch {
+            weightMap[addr] = 1;
+            computedSum += 1;
+          }
+        }
+        setCurrentWeights(weightMap);
+        if (computedSum > 0) {
+          setTotalWeight(computedSum);
+        }
+      } catch (err) {
+        console.error("Failed to load contract state for modal", err);
+      }
     }
-    if (formType === "change_threshold") {
-      Promise.all([getThreshold(), getOwners()])
-        .then(([thresh, owners]) => {
-          setCurrentThreshold(thresh);
-          setTotalOwners(owners.length);
-        })
-        .catch(() => {});
-    }
+    loadData();
   }, [formType]);
 
   // Initial focus
   useEffect(() => {
     const previousActiveElement = document.activeElement as HTMLElement | null;
+    const currentTrigger = triggerRef?.current;
     if (firstInputRef.current) {
       firstInputRef.current.focus();
     }
     return () => {
-      if (triggerRef?.current && typeof triggerRef.current.focus === "function") {
-        triggerRef.current.focus();
+      if (currentTrigger && typeof currentTrigger.focus === "function") {
+        currentTrigger.focus();
       } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
         previousActiveElement.focus();
       }
@@ -317,6 +381,32 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
       } satisfies ChangeThresholdFormData;
     }
 
+    if (formType === "change_owner_weight") {
+      if (!selectedOwner) {
+        setError("Select an owner to change weight.");
+        return null;
+      }
+      const weightNum = parseInt(newWeightInput, 10);
+      if (isNaN(weightNum) || weightNum < 1 || weightNum > 100000) {
+        setError("New weight must be between 1 and 100,000.");
+        return null;
+      }
+      if (!description.trim()) {
+        setError("Description is required.");
+        return null;
+      }
+      const dlErr = validateDeadline(deadline);
+      if (dlErr) { setError(dlErr); return null; }
+
+      return {
+        type: "change_owner_weight",
+        targetOwner: selectedOwner,
+        newWeight: weightNum,
+        description: description.trim(),
+        deadlineUnix: BigInt(Math.floor(new Date(deadline).getTime() / 1000)),
+      } satisfies ChangeOwnerWeightFormData;
+    }
+
     setError("Unknown proposal type.");
     return null;
   }
@@ -405,6 +495,15 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
           await createChangeThresholdProposal(
             walletAddress!,
             data.newThreshold,
+            data.description,
+            data.deadlineUnix
+          );
+          break;
+        case "change_owner_weight":
+          await createChangeOwnerWeightProposal(
+            walletAddress!,
+            data.targetOwner,
+            data.newWeight,
             data.description,
             data.deadlineUnix
           );
@@ -566,13 +665,23 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
             {ownerTouched && !StrKey.isValidEd25519PublicKey(ownerAddress.trim()) && (
               <p className="text-xs text-red-400 mt-1">Enter a valid Stellar address</p>
             )}
+            
+            {/* Live Voting-Power Preview (MIN_OWNER_WEIGHT = 1) */}
+            {ownerAddress && StrKey.isValidEd25519PublicKey(ownerAddress.trim()) && (
+              <div className="mt-3 text-xs text-zinc-400 bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-3 space-y-1">
+                <p className="text-zinc-300 font-medium font-sans">Live Impact Preview</p>
+                <p>Total voting weight will increase from <span className="font-mono text-zinc-200">{totalWeight}</span> to <span className="font-mono text-zinc-200">{totalWeight + 1}</span>.</p>
+                <p>New owner percentage share: <span className="font-mono text-zinc-300">{(totalWeight + 1 > 0 ? (1 / (totalWeight + 1)) * 100 : 0).toFixed(1)}%</span>.</p>
+                <p className="text-zinc-500 italic mt-1 font-sans">Note: The contract assigns a minimum weight of 1 (MIN_OWNER_WEIGHT) to newly added owners. Custom weights are not supported during owner creation.</p>
+              </div>
+            )}
           </div>
         )}
 
         {/* Remove Owner fields */}
         {formType === "remove_owner" && (
           <div>
-            <label className="text-xs text-zinc-400 block mb-1.5">
+            <label className="text-xs text-zinc-400 block mb-1.5 font-sans">
               Owner to Remove
             </label>
             <select
@@ -588,13 +697,34 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
                 </option>
               ))}
             </select>
+            
+            {/* Live Quorum-Impact Warning */}
+            {selectedOwner && (
+              <div className="mt-3 text-xs space-y-1">
+                <div className="bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-3">
+                  <p className="text-zinc-300 font-medium font-sans mb-1">Live Impact Preview</p>
+                  <p>Owner's current weight: <span className="font-mono text-zinc-200">{currentWeights[selectedOwner] ?? 1}</span>.</p>
+                  <p>Resulting total voting weight: <span className="font-mono text-zinc-200">{totalWeight - (currentWeights[selectedOwner] ?? 1)}</span> (threshold: <span className="font-mono text-zinc-200">{quorumWeight}</span>).</p>
+                </div>
+                {totalWeight - (currentWeights[selectedOwner] ?? 1) < quorumWeight && (
+                  <div className="mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg p-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0 mt-0.5">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    </svg>
+                    <p className="leading-normal font-sans">
+                      <strong>Warning:</strong> Removing this owner drops remaining total weight ({totalWeight - (currentWeights[selectedOwner] ?? 1)}) below the required quorum threshold ({quorumWeight}). Future proposals will not be executable.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {/* Change Threshold fields */}
         {formType === "change_threshold" && (
           <div>
-            <label className="text-xs text-zinc-400 block mb-1.5">
+            <label className="text-xs text-zinc-400 block mb-1.5 font-sans">
               New Threshold (currently {currentThreshold} of {totalOwners})
             </label>
             <input
@@ -607,9 +737,77 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
               max={totalOwners}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-mono placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
             />
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-zinc-500 mt-1 font-sans">
               Threshold must be between 1 and {totalOwners}
             </p>
+          </div>
+        )}
+
+        {/* Propose Weight Change fields */}
+        {formType === "change_owner_weight" && (
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-zinc-400 block mb-1.5 font-sans">
+                Target Owner
+              </label>
+              <select
+                ref={firstInputRef as unknown as React.Ref<HTMLSelectElement>}
+                value={selectedOwner}
+                onChange={(e) => setSelectedOwner(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-mono focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
+              >
+                <option value="">Select target owner…</option>
+                {availableOwners.map((addr) => (
+                  <option key={addr} value={addr}>
+                    {truncateAddress(addr)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 block mb-1.5 font-sans">
+                New Weight (1 – 100,000)
+              </label>
+              <input
+                value={newWeightInput}
+                onChange={(e) => setNewWeightInput(e.target.value)}
+                placeholder="Enter new weight..."
+                type="number"
+                min={1}
+                max={100000}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-mono placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+
+            {selectedOwner && newWeightInput && (() => {
+              const wVal = parseInt(newWeightInput, 10);
+              if (isNaN(wVal) || wVal < 1 || wVal > 100000) return null;
+              const oldW = currentWeights[selectedOwner] ?? 1;
+              const nextTotalW = totalWeight - oldW + wVal;
+              const newSharePct = nextTotalW > 0 ? (wVal / nextTotalW) * 100 : 0;
+              const exceedsCap = newSharePct > weightCapPct;
+
+              return (
+                <div className="mt-3 text-xs space-y-1">
+                  <div className="bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-3">
+                    <p className="text-zinc-300 font-medium font-sans mb-1">Live Impact Preview</p>
+                    <p>Resulting total voting weight: <span className="font-mono text-zinc-200">{nextTotalW}</span>.</p>
+                    <p>Owner's new share: <span className="font-mono text-zinc-200">{newSharePct.toFixed(1)}%</span> (cap: <span className="font-mono text-zinc-200">{weightCapPct}%</span>).</p>
+                  </div>
+                  {exceedsCap && (
+                    <div className="mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg p-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0 mt-0.5">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                      </svg>
+                      <p className="leading-normal font-sans">
+                        <strong>Warning:</strong> Resulting weight share ({newSharePct.toFixed(1)}%) exceeds the contract's configured max weight cap ({weightCapPct}%). This weight change proposal may be rejected by the contract upon execution.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -720,8 +918,24 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
             {formType === "change_threshold" && (
               <>
                 <div>
-                  <dt className="text-xs text-zinc-500">Action</dt>
-                  <dd className="mt-1 text-sm text-zinc-200">Change approval threshold to {newThreshold} of {totalOwners}</dd>
+                  <dt className="text-xs text-zinc-500 font-sans">Action</dt>
+                  <dd className="mt-1 text-sm text-zinc-200 font-sans">Change approval threshold to {newThreshold} of {totalOwners}</dd>
+                </div>
+              </>
+            )}
+            {formType === "change_owner_weight" && (
+              <>
+                <div>
+                  <dt className="text-xs text-zinc-500 font-sans">Action</dt>
+                  <dd className="mt-1 text-sm text-zinc-200 font-sans font-medium">Propose owner weight change</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-zinc-500 font-sans">Target Owner</dt>
+                  <dd className="mt-1 break-all font-mono text-sm text-zinc-200">{selectedOwner}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-zinc-500 font-sans">New Weight</dt>
+                  <dd className="mt-1 font-mono text-sm text-zinc-200 font-medium">{newWeightInput}</dd>
                 </div>
               </>
             )}

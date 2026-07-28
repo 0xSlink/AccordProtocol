@@ -16,11 +16,11 @@ import type {
 } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
-const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
-const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ADDRESS as string;
-const NETWORK_PASSPHRASE = import.meta.env.VITE_NETWORK_PASSPHRASE as string;
+const RPC_URL = (import.meta.env.VITE_SOROBAN_RPC_URL as string) || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID = (import.meta.env.VITE_CONTRACT_ADDRESS as string) || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFFFFFF";
+const NETWORK_PASSPHRASE = (import.meta.env.VITE_NETWORK_PASSPHRASE as string) || "Test SDF Network ; September 2015";
 // Any funded testnet account — used only to build simulation transactions (no signing).
-const SIM_SOURCE = import.meta.env.VITE_SIM_SOURCE as string;
+const SIM_SOURCE = (import.meta.env.VITE_SIM_SOURCE as string) || "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const server = new rpc.Server(RPC_URL);
 
@@ -177,6 +177,45 @@ export async function getOwners(): Promise<string[]> {
   const val = await simulateView("get_owners");
   return scValToNative(val) as string[];
 }
+
+export async function getOwnerWeight(owner: string): Promise<number> {
+  try {
+    const val = await simulateView("get_owner_weight", [
+      nativeToScVal(owner, { type: "address" }),
+    ]);
+    return Number(scValToNative(val));
+  } catch {
+    return 1;
+  }
+}
+
+export async function getTotalWeight(): Promise<number> {
+  try {
+    const val = await simulateView("get_total_weight");
+    return Number(scValToNative(val));
+  } catch {
+    return 0;
+  }
+}
+
+export async function getRequiredQuorumWeight(): Promise<number> {
+  try {
+    const val = await simulateView("get_required_quorum_weight");
+    return Number(scValToNative(val));
+  } catch {
+    return 0;
+  }
+}
+
+export async function getWeightCapPct(): Promise<number> {
+  try {
+    const val = await simulateView("get_max_single_owner_weight_pct");
+    return Number(scValToNative(val));
+  } catch {
+    return 50;
+  }
+}
+
 
 export async function getThreshold(): Promise<number> {
   const val = await simulateView("get_threshold");
