@@ -2067,6 +2067,52 @@ fn get_proposals_paged_returns_empty_beyond_offset() {
 }
 
 #[test]
+fn get_proposals_paged_large_offset_returns_empty() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    for _ in 0..3_u32 {
+        client.create_proposal(
+            &owner_a,
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address,
+            ),
+            &str(&env, "Large offset"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    let page = client.get_proposals_paged(&u64::MAX, &5);
+    assert!(page.is_empty());
+}
+
+#[test]
+fn get_proposals_paged_small_in_range_offset_still_returns_expected_page() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    for _ in 0..4_u32 {
+        client.create_proposal(
+            &owner_a,
+            &t(
+                &env,
+                &Address::generate(&env),
+                1_000_000,
+                &token_client.address,
+            ),
+            &str(&env, "Pagination"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
+    }
+
+    let page = client.get_proposals_paged(&1, &2);
+    assert_eq!(page.len(), 2);
+    assert_eq!(page.get(0).unwrap().id, 2);
+    assert_eq!(page.get(1).unwrap().id, 3);
+}
+
+#[test]
 fn get_total_proposals_counts_all_ever_created() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(1);
     // Create 3 proposals

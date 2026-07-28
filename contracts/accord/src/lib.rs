@@ -2041,10 +2041,24 @@ impl AccordContract {
             limit = 20;
         }
         let next_id = read_next_id(&env);
+        let total_proposals = next_id.saturating_sub(1);
+
+        if offset >= total_proposals {
+            return Vec::new(&env);
+        }
+
+        let Some(start) = offset.checked_add(1) else {
+            return Vec::new(&env);
+        };
+        let Some(end) = offset.checked_add(u64::from(limit)) else {
+            return Vec::new(&env);
+        };
+        let end = end.min(total_proposals);
 
         let mut result = Vec::new(&env);
-        let start = offset + 1;
-        let end = (offset + u64::from(limit)).min(next_id.saturating_sub(1));
+        if start > end {
+            return result;
+        }
 
         for id in start..=end {
             if let Ok(mut proposal) = read_proposal(&env, id) {
