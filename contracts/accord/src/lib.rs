@@ -97,6 +97,13 @@ pub struct OwnerWeight {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub struct SpendingLimitEntry {
+    pub token: Address,
+    pub limit: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub struct ProposalCreatedEvent {
     pub id: u64,
     pub proposer: Address,
@@ -310,6 +317,10 @@ fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Add
     (symbol_short!("SLIMIT"), owner.clone(), token.clone())
 }
 
+fn owner_spending_limits_key(owner: &Address) -> (Symbol, Address) {
+    (symbol_short!("OSLIM"), owner.clone())
+}
+
 fn total_weight_key() -> Symbol {
     symbol_short!("TWGT")
 }
@@ -338,6 +349,16 @@ fn read_max_single_owner_weight_pct(env: &Env) -> u32 {
 fn owner_weight_within_cap(env: &Env, owner_weight: u32, total_weight: u32) -> bool {
     (owner_weight as u64) * 100
         <= (total_weight as u64) * (read_max_single_owner_weight_pct(env) as u64)
+}
+
+fn checked_weight_add(lhs: u32, rhs: u32) -> Result<u32, ContractError> {
+    lhs.checked_add(rhs)
+        .ok_or(ContractError::ArithmeticError)
+}
+
+fn checked_weight_sub(lhs: u32, rhs: u32) -> Result<u32, ContractError> {
+    lhs.checked_sub(rhs)
+        .ok_or(ContractError::ArithmeticError)
 }
 
 fn spent_tracking_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
@@ -401,6 +422,11 @@ const MAX_PROPOSAL_DURATION: u64 = 7_776_000;
 const MIN_OWNER_WEIGHT: u32 = 1;
 /// Maximum owner weight.
 const MAX_OWNER_WEIGHT: u32 = 100_000;
+/// Maximum possible total voting weight when every owner is at the maximum
+/// allowed weight. With the current bounds this is 20 × 100_000 = 2_000_000,
+/// which fits comfortably within u32 and keeps all running-total weight sums
+/// safe from overflow.
+const MAX_TOTAL_WEIGHT: u32 = MAX_OWNERS * MAX_OWNER_WEIGHT;
 /// Highest configurable share of total voting weight any one owner may receive
 /// via a weight-change proposal. A strict majority would permit unilateral quorum.
 const MAX_SINGLE_OWNER_WEIGHT_PCT: u32 = 50;
@@ -536,6 +562,44 @@ fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128
     let key = spending_limit_key(owner, token);
     env.storage().persistent().set(&key, &limit);
     bump_persistent(env, &key);
+}
+
+fn read_owner_spending_limits(env: &Env, owner: &Address) -> Vec<SpendingLimitEntry> {
+    let key = owner_spending_limits_key(owner);
+    let limits: Vec<SpendingLimitEntry> = env.storage().persistent().get(&key).unwrap_or(Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    limits
+}
+
+fn write_owner_spending_limits(env: &Env, owner: &Address, limits: &Vec<SpendingLimitEntry>) {
+    let key = owner_spending_limits_key(owner);
+    env.storage().persistent().set(&key, limits);
+    bump_persistent(env, &key);
+}
+
+fn upsert_owner_spending_limit(env: &Env, owner: &Address, token: &Address, limit: i128) {
+    let mut limits = read_owner_spending_limits(env, owner);
+    let mut updated = false;
+    for idx in 0..limits.len() {
+        let mut entry = limits.get(idx).unwrap();
+        if entry.token == *token {
+            entry.limit = limit;
+            limits.set(idx, entry);
+            updated = true;
+            break;
+        }
+    }
+
+    if !updated {
+        limits.push_back(SpendingLimitEntry {
+            token: token.clone(),
+            limit,
+        });
+    }
+
+    write_owner_spending_limits(env, owner, &limits);
 }
 
 fn read_spent_tracker(env: &Env, owner: &Address, token: &Address) -> SpentTracker {
@@ -821,9 +885,11 @@ impl AccordContract {
             }
             owner.require_auth();
             owners_map.set(owner.clone(), weight);
-            total_weight = total_weight
-                .checked_add(weight)
-                .ok_or(ContractError::ArithmeticError)?;
+            total_weight = checked_weight_add(total_weight, weight)?;
+        }
+
+        if total_weight > MAX_TOTAL_WEIGHT {
+            return Err(ContractError::ArithmeticError);
         }
 
         // Validate threshold against total weight, not owner count. The threshold
@@ -1099,9 +1165,7 @@ impl AccordContract {
         }
 
         let current_total = read_total_weight(&env);
-        let resulting_total = current_total
-            .checked_add(weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        let resulting_total = checked_weight_add(current_total, weight)?;
         if !owner_weight_within_cap(&env, weight, resulting_total) {
             return Err(ContractError::SingleOwnerWeightCapExceeded);
         }
@@ -1269,11 +1333,10 @@ impl AccordContract {
         let target_weight = owners.get(target_owner.clone()).unwrap();
 
         let current_total = read_total_weight(&env);
-        let resulting_total = current_total
-            .checked_sub(target_weight)
-            .ok_or(ContractError::ArithmeticError)?
-            .checked_add(new_weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        let resulting_total = checked_weight_add(
+            checked_weight_sub(current_total, target_weight)?,
+            new_weight,
+        )?;
         if !owner_weight_within_cap(&env, new_weight, resulting_total) {
             return Err(ContractError::SingleOwnerWeightCapExceeded);
         }
@@ -1363,9 +1426,7 @@ impl AccordContract {
             .get(owner_to_remove.clone())
             .ok_or(ContractError::OwnerNotFound)?;
         let current_total_weight = read_total_weight(&env);
-        let resulting_total_weight = current_total_weight
-            .checked_sub(removed_weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        let resulting_total_weight = checked_weight_sub(current_total_weight, removed_weight)?;
 
         // Check 1: Ensure the resulting total weight is still >= the contract's current threshold.
         if resulting_total_weight < threshold {
@@ -1549,15 +1610,9 @@ impl AccordContract {
         write_approval(&env, proposal_id, &approver, true);
 
         
-        proposal.approvals = proposal
-            .approvals
-            .checked_add(weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        proposal.approvals = checked_weight_add(proposal.approvals, weight)?;
 
-        proposal.approval_weight = proposal
-            .approval_weight
-            .checked_add(weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        proposal.approval_weight = checked_weight_add(proposal.approval_weight, weight)?;
 
         // Record the timestamp when the proposal first crosses the threshold.
         if proposal.ready_at == 0 && proposal.approvals >= proposal.quorum_weight {
@@ -1607,15 +1662,9 @@ impl AccordContract {
         write_approval(&env, proposal_id, &approver, false);
 
         
-        proposal.approvals = proposal
-            .approvals
-            .checked_sub(weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        proposal.approvals = checked_weight_sub(proposal.approvals, weight)?;
 
-        proposal.approval_weight = proposal
-            .approval_weight
-            .checked_sub(weight)
-            .ok_or(ContractError::ArithmeticError)?;
+        proposal.approval_weight = checked_weight_sub(proposal.approval_weight, weight)?;
 
         proposal.status = derive_status(&env, &proposal);
         write_proposal(&env, &proposal);
@@ -1736,9 +1785,7 @@ impl AccordContract {
                     return Err(ContractError::InvalidWeight);
                 }
                 let current_total = read_total_weight(&env);
-                let new_total = current_total
-                    .checked_add(*weight)
-                    .ok_or(ContractError::ArithmeticError)?;
+                let new_total = checked_weight_add(current_total, *weight)?;
                 if !owner_weight_within_cap(&env, *weight, new_total) {
                     return Err(ContractError::SingleOwnerWeightCapExceeded);
                 }
@@ -1768,9 +1815,7 @@ impl AccordContract {
                 let weight = owners.get(owner_to_remove.clone()).unwrap_or(0);
 
                 let current_total_weight = read_total_weight(&env);
-                let resulting_total_weight = current_total_weight
-                    .checked_sub(weight)
-                    .ok_or(ContractError::ArithmeticError)?;
+                let resulting_total_weight = checked_weight_sub(current_total_weight, weight)?;
 
                 // Re-validation 1: Ensure the resulting total weight is still >= the contract's current threshold.
                 let current_threshold = read_threshold(&env)?;
@@ -1815,6 +1860,11 @@ impl AccordContract {
                 );
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
+                let current_total_weight = read_total_weight(&env);
+                if *new_threshold > current_total_weight {
+                    return Err(ContractError::WouldBreakThreshold);
+                }
+
                 let old_threshold = env
                     .storage()
                     .instance()
@@ -1835,6 +1885,7 @@ impl AccordContract {
             ProposalKind::SetSpendingLimit(owner, token, limit) => {
                 let prev_limit = read_spending_limit(&env, owner, token);
                 write_spending_limit(&env, owner, token, *limit);
+                upsert_owner_spending_limit(&env, owner, token, *limit);
                 // Reset cumulative spending tracking when a new limit is set.
                 let now = env.ledger().timestamp();
                 write_spent_tracker(
@@ -1868,11 +1919,10 @@ impl AccordContract {
                     .get(target_owner.clone())
                     .ok_or(ContractError::TargetOwnerNoLongerExists)?;
                 let current_total = read_total_weight(&env);
-                let new_total = current_total
-                    .checked_sub(old_weight)
-                    .ok_or(ContractError::ArithmeticError)?
-                    .checked_add(*new_weight)
-                    .ok_or(ContractError::ArithmeticError)?;
+                let new_total = checked_weight_add(
+                    checked_weight_sub(current_total, old_weight)?,
+                    *new_weight,
+                )?;
 
                 if !owner_weight_within_cap(&env, *new_weight, new_total) {
                     return Err(ContractError::SingleOwnerWeightCapExceeded);
@@ -2046,10 +2096,24 @@ impl AccordContract {
             limit = 20;
         }
         let next_id = read_next_id(&env);
+        let total_proposals = next_id.saturating_sub(1);
+
+        if offset >= total_proposals {
+            return Vec::new(&env);
+        }
+
+        let Some(start) = offset.checked_add(1) else {
+            return Vec::new(&env);
+        };
+        let Some(end) = offset.checked_add(u64::from(limit)) else {
+            return Vec::new(&env);
+        };
+        let end = end.min(total_proposals);
 
         let mut result = Vec::new(&env);
-        let start = offset + 1;
-        let end = (offset + u64::from(limit)).min(next_id.saturating_sub(1));
+        if start > end {
+            return result;
+        }
 
         for id in start..=end {
             if let Ok(mut proposal) = read_proposal(&env, id) {
@@ -2082,6 +2146,12 @@ impl AccordContract {
     /// limit is set (the owner is unrestricted for that token).
     pub fn get_spending_limit(env: Env, owner: Address, token: Address) -> Option<i128> {
         read_spending_limit(&env, &owner, &token)
+    }
+
+    /// Returns every configured spending-limit entry for `owner`, as a list of
+    /// `(token, limit)` pairs. Owners with no configured limits receive an empty list.
+    pub fn get_owner_spending_limits(env: Env, owner: Address) -> Vec<SpendingLimitEntry> {
+        read_owner_spending_limits(&env, &owner)
     }
 
     /// Returns the remaining spending limit (limit minus cumulative spent within

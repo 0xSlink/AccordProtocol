@@ -503,6 +503,24 @@ await submitOwnerCall(
 );
 ```
 
+### `get_owner_spending_limits`
+
+```rust
+fn get_owner_spending_limits(env: Env, owner: Address) -> Vec<SpendingLimitEntry>
+```
+
+Returns every currently configured spending-limit entry for `owner` as a list of `(token, limit)` pairs. Owners with no configured limits return an empty list. Updating an existing limit for the same token replaces the prior entry instead of creating a duplicate.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `owner` | `Address` | The owner whose configured spending limits should be returned |
+
+**Returns:** `Vec<SpendingLimitEntry>`
+
+```js
+await contract.call("get_owner_spending_limits", nativeToScVal(owner, { type: "address" }));
+```
+
 ---
 
 ## Guardian & Emergency Pause
