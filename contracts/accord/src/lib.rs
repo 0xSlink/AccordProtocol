@@ -1811,6 +1811,11 @@ impl AccordContract {
                 );
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
+                let current_total_weight = read_total_weight(&env);
+                if *new_threshold > current_total_weight {
+                    return Err(ContractError::WouldBreakThreshold);
+                }
+
                 let old_threshold = env
                     .storage()
                     .instance()

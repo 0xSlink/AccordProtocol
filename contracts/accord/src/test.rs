@@ -6197,6 +6197,33 @@ fn test_quorum_matrix_remove_owner_and_remove_owner_blocked() {
     assert_eq!(res, Err(Ok(ContractError::WouldBreakThreshold)));
 
     assert_eq!(client.get_total_weight(), 2);
+    assert_eq!(client.get_proposal(&p2).status, ProposalStatus::Ready);
+    assert_eq!(client.get_total_proposals(), 2);
+}
+
+#[test]
+fn test_quorum_matrix_remove_owner_and_remove_owner_both_succeed_in_either_order() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+    let (client, owners) = setup_matrix(&env, 4, 2);
+
+    let p1 = client.create_remove_owner_proposal(&owners.get(0).unwrap(), &owners.get(1).unwrap(), &str(&env, "d1"), &DEADLINE);
+    let p2 = client.create_remove_owner_proposal(&owners.get(0).unwrap(), &owners.get(2).unwrap(), &str(&env, "d2"), &DEADLINE);
+
+    client.approve(&owners.get(0).unwrap(), &p1);
+    client.approve(&owners.get(2).unwrap(), &p1);
+    client.approve(&owners.get(0).unwrap(), &p2);
+    client.approve(&owners.get(3).unwrap(), &p2);
+
+    client.execute(&owners.get(0).unwrap(), &p1);
+    assert_eq!(client.get_proposal(&p1).status, ProposalStatus::Executed);
+
+    client.execute(&owners.get(0).unwrap(), &p2);
+    assert_eq!(client.get_proposal(&p2).status, ProposalStatus::Executed);
+
+    assert_eq!(client.get_owners().len(), 2);
+    assert_eq!(client.get_total_weight(), 2);
+    assert_eq!(client.get_total_proposals(), 2);
 }
 
 // 2. RemoveOwner & ChangeOwnerWeight
@@ -6294,15 +6321,43 @@ fn test_quorum_matrix_remove_owner_and_change_threshold_blocked() {
     client.approve(&owners.get(1).unwrap(), &p_thresh);
     client.approve(&owners.get(2).unwrap(), &p_thresh);
     
-    // Execute remove first: total weight = 2. owners.len() = 2.
     client.execute(&owners.get(0).unwrap(), &p_remove);
 
-    // GAP: ChangeThreshold execution DOES NOT check if `new_threshold <= owners.len()`.
-    // It only checks at creation! So this is another GAP.
     let res = client.try_execute(&owners.get(0).unwrap(), &p_thresh);
-    assert!(res.is_ok(), "GAP: ChangeThreshold execution does not check owners.len()");
+    assert_eq!(res, Err(Ok(ContractError::WouldBreakThreshold)));
     
-    assert!(client.get_threshold() > client.get_owners().len() as u32);
+    assert_eq!(client.get_threshold(), 2);
+    assert_eq!(client.get_owners().len(), 2);
+    assert_eq!(client.get_proposal(&p_thresh).status, ProposalStatus::Ready);
+    assert_eq!(client.get_total_proposals(), 2);
+}
+
+#[test]
+fn test_quorum_matrix_change_threshold_and_remove_owner_blocked_in_reverse_order() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+    let (client, owners) = setup_matrix(&env, 3, 2);
+
+    let p_thresh = client.create_change_threshold_proposal(&owners.get(0).unwrap(), &3, &str(&env, "d1"), &DEADLINE);
+    let p_remove = client.create_remove_owner_proposal(&owners.get(0).unwrap(), &owners.get(2).unwrap(), &str(&env, "d2"), &DEADLINE);
+
+    client.approve(&owners.get(0).unwrap(), &p_thresh);
+    client.approve(&owners.get(1).unwrap(), &p_thresh);
+    client.approve(&owners.get(2).unwrap(), &p_thresh);
+
+    client.approve(&owners.get(0).unwrap(), &p_remove);
+    client.approve(&owners.get(1).unwrap(), &p_remove);
+
+    client.execute(&owners.get(0).unwrap(), &p_thresh);
+    assert_eq!(client.get_threshold(), 3);
+
+    let res = client.try_execute(&owners.get(0).unwrap(), &p_remove);
+    assert_eq!(res, Err(Ok(ContractError::WouldBreakThreshold)));
+
+    assert_eq!(client.get_threshold(), 3);
+    assert_eq!(client.get_owners().len(), 3);
+    assert_eq!(client.get_proposal(&p_remove).status, ProposalStatus::Ready);
+    assert_eq!(client.get_total_proposals(), 2);
 }
 
 // 4. ChangeOwnerWeight & ChangeOwnerWeight
