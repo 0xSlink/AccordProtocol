@@ -1,7 +1,7 @@
 # Accord Protocol — Architecture
 
 ## 1. System Overview
-
+ 
 ```text
 ┌──────────────────────────────┐
 │     Web Client (Vite/React)  │
@@ -61,6 +61,7 @@ All instance-storage keys share **one** `LedgerEntry` (the contract instance). T
 | `THRESH` | `u32`  | Approval threshold                        | 518,400 / 17,280                 |
 | `NEXT`   | `u64`  | Monotonic proposal ID counter             | 518,400 / 17,280                 |
 | `ACTCNT` | `u32`  | Active proposal count (budget guard)      | 518,400 / 17,280                 |
+| `TWGT`   | `u32`  | Cached total owner weight                  | 518,400 / 17,280                 |
 | `TLOCK`  | `u64`  | Time-lock delay in seconds (0 = disabled) | 518,400 / 17,280                 |
 
 **Instance entry cost**: all five keys together occupy roughly **~150 bytes** XDR-encoded (rounds to 1 KB for billing) → **~0.052 XLM per 30 days** (see [Storage Cost Methodology](#storage-cost-methodology) below).
@@ -114,6 +115,14 @@ Accord uses two patterns:
 | `("APPR", id, owner)` | Approval flag keyed by proposal ID and approver address |
 
 Tuples are preferred over concatenated strings because Soroban hashes the entire key structure natively — string concatenation would require heap allocation and introduces ambiguity (`"PROP1"` vs `"PRO" + "P1"` are indistinguishable as strings, but distinct as tuples). Tuple keys are zero-copy, structurally unambiguous, and compose cleanly with Soroban's type-safe storage API.
+
+### Lifecycle of Per-Owner Persistent Storage Entries
+
+When an owner is removed from governance via `RemoveOwner`, the execution logic updates the `OWNERS` map and `TWEIGHT` (total weight) in storage. Per-owner persistent storage entries indexed by `Address` are not automatically swept or deleted upon owner removal:
+
+- **Per-Proposal Approval Entries (`("APPR", id, owner)`)**: Persistent approval entries for removed owners remain in ledger storage. Calling `has_approved(proposal_id, address)` directly reads `APPR` and returns `true` for an approval recorded prior to removal. High-level view functions like `get_approvers(proposal_id)` iterate only currently registered owners in `OWNERS`, automatically excluding removed addresses from the active approvers list.
+- **Spending Limit & Tracker Entries (`("SLIMIT", owner, token)` and `("SPENT", owner, token)`)**: Persistent spending limit bounds and tracking epochs are stored per `(owner, token)` pair and are not erased when an owner is removed.
+- **Re-added Owner Inheritance**: If an address is removed and later re-added as an owner via `AddOwner`, any pre-existing `SLIMIT` and `SPENT` entries associated with that address remain active in storage. The re-added owner immediately inherits those previous spending limits unless a new `SetSpendingLimit` proposal is created and executed to update or clear the limit.
 
 ### Storage Cost Per Proposal
 
@@ -355,8 +364,8 @@ The contract address plus one topic string together uniquely identify a stream o
 | Topics          | Data Type                                                      | Consumer            |
 | --------------- | -------------------------------------------------------------- | ------------------- |
 | `("created",)`  | `ProposalCreatedEvent { id, proposer, to, amount, threshold }` | Proposal feed       |
-| `("approved",)` | `ProposalApprovedEvent { id, approver, approvals, threshold }` | Approval bar update |
-| `("revoked",)`  | `ProposalRevokedEvent { id, approver, approvals }`             | Approval bar update |
+| `("approved",)` | `ProposalApprovedEvent { id, approver, approvals, threshold, weight, cumulative_weight }` | Approval bar update |
+| `("revoked",)`  | `ProposalRevokedEvent { id, approver, approvals, weight, cumulative_weight }`             | Approval bar update |
 | `("executed",)` | `ProposalExecutedEvent { id, executor, to, amount }`           | Execution history   |
 
 ### Indexing Accord Events

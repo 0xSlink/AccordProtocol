@@ -21,6 +21,7 @@ vi.mock("../hooks/useContract", () => ({
 const baseProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   id: 42,
   kind: "transfer",
+  category: "transfer",
   to: "GABCDE...WXYZ",
   amount: "100",
   token: "USDC",
