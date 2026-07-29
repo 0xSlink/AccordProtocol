@@ -6,14 +6,21 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Proposal, ProposalStatus } from "../types/accord";
+import type {
+  Proposal,
+  ProposalCategory,
+  ProposalEvent,
+  ProposalEventType,
+  ProposalKind,
+  ProposalStatus,
+} from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
-const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
-const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ADDRESS as string;
-const NETWORK_PASSPHRASE = import.meta.env.VITE_NETWORK_PASSPHRASE as string;
+const RPC_URL = (import.meta.env.VITE_SOROBAN_RPC_URL as string) || "https://soroban-testnet.stellar.org";
+const CONTRACT_ID = (import.meta.env.VITE_CONTRACT_ADDRESS as string) || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFFFFFF";
+const NETWORK_PASSPHRASE = (import.meta.env.VITE_NETWORK_PASSPHRASE as string) || "Test SDF Network ; September 2015";
 // Any funded testnet account — used only to build simulation transactions (no signing).
-const SIM_SOURCE = import.meta.env.VITE_SIM_SOURCE as string;
+const SIM_SOURCE = (import.meta.env.VITE_SIM_SOURCE as string) || "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const server = new rpc.Server(RPC_URL);
 
@@ -48,6 +55,32 @@ function mapStatus(raw: unknown): ProposalStatus {
   return "pending";
 }
 
+function mapCategory(raw: unknown): ProposalCategory {
+  // Soroban unit-enum variants decode either to their name as a string or to a
+  // single-key object, so handle both shapes like mapStatus does. Anything
+  // unrecognised (including an unset category) falls back to "other".
+  let key: string;
+  if (typeof raw === "string") {
+    key = raw;
+  } else if (raw && typeof raw === "object") {
+    key = Object.keys(raw as object)[0] ?? "Other";
+  } else {
+    return "other";
+  }
+  switch (key.toLowerCase()) {
+    case "transfer":
+      return "transfer";
+    case "payroll":
+      return "payroll";
+    case "grant":
+      return "grant";
+    case "ops":
+      return "ops";
+    default:
+      return "other";
+  }
+}
+
 function safeBigInt(value: unknown): bigint {
   try {
     if (
@@ -64,13 +97,9 @@ function safeBigInt(value: unknown): bigint {
   }
 }
 
-function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"> {
+function mapKind(kind: unknown): { kind: ProposalKind; to: string; amount: string; token: string } {
   if (!kind || typeof kind !== "object") {
-    return {
-      to: "Unknown",
-      amount: "0",
-      token: "Unknown",
-    };
+    return { kind: "transfer", to: "Unknown", amount: "0", token: "Unknown" };
   }
 
   const [variant, payload] = Object.entries(kind as Record<string, unknown>)[0] ?? [];
@@ -80,47 +109,56 @@ function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"
   switch (normalizedVariant) {
     case "transfer":
       return {
+        kind: "transfer",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: stroopsToDisplay(safeBigInt(values[1])),
         token: shortenAddr(String(values[2] ?? "Unknown")),
       };
     case "addowner":
       return {
+        kind: "add_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: "—",
         token: "Add owner",
       };
     case "removeowner":
       return {
+        kind: "remove_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: "—",
         token: "Remove owner",
       };
     case "changethreshold":
       return {
+        kind: "change_threshold",
         to: `${values[0] ?? "Unknown"} approvals`,
         amount: "—",
         token: "Threshold",
       };
-    default:
+    case "setspendinglimit":
       return {
-        to: "Unknown",
-        amount: "0",
-        token: "Unknown",
+        kind: "set_spending_limit",
+        to: shortenAddr(String(values[0] ?? "Unknown")),
+        amount: stroopsToDisplay(safeBigInt(values[1])),
+        token: shortenAddr(String(values[2] ?? "Unknown")),
       };
+    default:
+      return { kind: "transfer", to: "Unknown", amount: "0", token: "Unknown" };
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function mapProposal(raw: any, threshold: number): Proposal {
   const rawDeadline = BigInt(raw.deadline);
-  const details = mapKindDetails(raw.kind);
+  const mapped = mapKind(raw.kind);
 
   return {
     id: Number(raw.id),
-    to: details.to,
-    amount: details.amount,
-    token: details.token,
+    kind: mapped.kind,
+    category: mapCategory(raw.category),
+    to: mapped.to,
+    amount: mapped.amount,
+    token: mapped.token,
     description: String(raw.description),
     approvals: Number(raw.approvals),
     threshold,
@@ -131,6 +169,7 @@ export function mapProposal(raw: any, threshold: number): Proposal {
     proposer: shortenAddr(String(raw.proposer)),
     userHasApproved: false,
     approverAddresses: [],
+    executedAt: formatDeadline(rawDeadline),
   };
 }
 
@@ -139,9 +178,61 @@ export async function getOwners(): Promise<string[]> {
   return scValToNative(val) as string[];
 }
 
+export async function getOwnerWeight(owner: string): Promise<number> {
+  try {
+    const val = await simulateView("get_owner_weight", [
+      nativeToScVal(owner, { type: "address" }),
+    ]);
+    return Number(scValToNative(val));
+  } catch {
+    return 1;
+  }
+}
+
+export async function getTotalWeight(): Promise<number> {
+  try {
+    const val = await simulateView("get_total_weight");
+    return Number(scValToNative(val));
+  } catch {
+    return 0;
+  }
+}
+
+export async function getRequiredQuorumWeight(): Promise<number> {
+  try {
+    const val = await simulateView("get_required_quorum_weight");
+    return Number(scValToNative(val));
+  } catch {
+    return 0;
+  }
+}
+
+export async function getWeightCapPct(): Promise<number> {
+  try {
+    const val = await simulateView("get_max_single_owner_weight_pct");
+    return Number(scValToNative(val));
+  } catch {
+    return 50;
+  }
+}
+
+
 export async function getThreshold(): Promise<number> {
   const val = await simulateView("get_threshold");
   return Number(scValToNative(val));
+}
+
+export async function getSpendingLimit(owner: string, token: string): Promise<bigint> {
+  try {
+    const val = await simulateView("get_spending_limit", [
+      nativeToScVal(owner, { type: "address" }),
+      nativeToScVal(token, { type: "address" }),
+    ]);
+    const raw = scValToNative(val);
+    return safeBigInt(raw);
+  } catch {
+    return -1n; // No limit record exists
+  }
 }
 
 export async function getTotalProposals(): Promise<number> {
@@ -235,8 +326,8 @@ async function simulateContractView(
 }
 
 export async function getContractXlmBalance(): Promise<string> {
-  const account = await server.getAccount(CONTRACT_ID);
-  const stroops = BigInt(account.balance);
+  const entry = await server.getAccountEntry(CONTRACT_ID);
+  const stroops = BigInt(entry.balance().toString());
   return stroopsToDisplay(stroops);
 }
 
@@ -254,6 +345,26 @@ export async function getContractUsdcBalance(): Promise<string> {
     return "0";
   } catch {
     return "—";
+  }
+}
+
+export async function getGuardian(): Promise<string> {
+  try {
+    const val = await simulateView("get_guardian");
+    const raw = scValToNative(val);
+    return String(raw);
+  } catch {
+    return "Unknown";
+  }
+}
+
+export async function isFrozen(): Promise<boolean> {
+  try {
+    const val = await simulateView("is_frozen");
+    const raw = scValToNative(val);
+    return Boolean(raw);
+  } catch {
+    return false;
   }
 }
 
@@ -276,3 +387,101 @@ export async function getApprovers(proposalId: number): Promise<string[]> {
     return [];
   }
 }
+
+function parseScVal(val: unknown): unknown {
+  if (!val) return null;
+  if (typeof val === "string") {
+    try {
+      return scValToNative(xdr.ScVal.fromXDR(val, "base64"));
+    } catch {
+      return val;
+    }
+  }
+  try {
+    return scValToNative(val as xdr.ScVal);
+  } catch {
+    return val;
+  }
+}
+
+function formatEventTimestamp(ledgerClosedAt?: string, ledger?: number): string {
+  if (ledgerClosedAt) {
+    const d = new Date(ledgerClosedAt);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    }
+  }
+  if (ledger) {
+    return `Ledger #${ledger}`;
+  }
+  return "Just now";
+}
+
+export async function getProposalEvents(proposalId: number): Promise<ProposalEvent[]> {
+  try {
+    let startLedger = 1;
+    try {
+      const latest = await getLatestLedger();
+      startLedger = Math.max(1, latest - 10000);
+    } catch {
+      startLedger = 1;
+    }
+
+    const res = await server.getEvents({
+      startLedger,
+      filters: [
+        {
+          type: "contract",
+          contractIds: [CONTRACT_ID],
+        },
+      ],
+      limit: 100,
+    });
+
+    const events: ProposalEvent[] = [];
+
+    if (res.events && Array.isArray(res.events)) {
+      for (const rawEv of res.events) {
+        try {
+          const rawTopic = Array.isArray(rawEv.topic) ? rawEv.topic : [rawEv.topic];
+          const topics = rawTopic.map(parseScVal);
+          const topicName = String(topics[0] ?? "").toLowerCase();
+
+          if (topicName === "approved" || topicName === "revoked" || topicName === "executed") {
+            const nativeValue = parseScVal(rawEv.value) as Record<string, unknown> | null;
+            if (nativeValue && typeof nativeValue === "object") {
+              const eventPropId = Number(nativeValue.id ?? -1);
+              if (eventPropId === proposalId) {
+                const rawActor = String(
+                  nativeValue.approver ?? nativeValue.executor ?? nativeValue.actor ?? ""
+                );
+                const actor = rawActor ? shortenAddr(rawActor) : "Unknown";
+                const timestamp = formatEventTimestamp(rawEv.ledgerClosedAt, rawEv.ledger);
+
+                events.push({
+                  type: topicName as ProposalEventType,
+                  actor,
+                  timestamp,
+                  ledger: rawEv.ledger,
+                });
+              }
+            }
+          }
+        } catch (evErr) {
+          console.warn("Failed to parse event record:", evErr);
+        }
+      }
+    }
+
+    // Sort chronologically (oldest to newest)
+    events.sort((a, b) => (a.ledger ?? 0) - (b.ledger ?? 0));
+    return events;
+  } catch (err) {
+    console.error(`Failed to fetch events for proposal #${proposalId}:`, err);
+    throw err;
+  }
+}
+
