@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { getSpendingLimit, getWeightCapPct, getRequiredQuorumWeight } from "../lib/contract";
+import { useEffect, useMemo, useState } from "react";
+import { getRequiredQuorumWeight, getSpendingLimit } from "../lib/contract";
 import { createSpendingLimitProposal } from "../lib/submit";
 import {
   displayToStroops,
@@ -62,6 +62,7 @@ export function OwnersPage({
     weights,
     totalWeight,
     loading: weightsLoading,
+    error: weightsError,
   } = useOwnerWeights(ownerAddresses);
   const [spendingLimits, setSpendingLimits] = useState<SpendingLimitMap>({});
   const [limitsLoading, setLimitsLoading] = useState(true);
@@ -71,6 +72,13 @@ export function OwnersPage({
     "all",
   );
   const [shareThreshold, setShareThreshold] = useState("0");
+
+  // Quorum simulator state
+  const [selectedAddresses, setSelectedAddresses] = useState<Set<string>>(
+    new Set(),
+  );
+  const [requiredQuorumWeight, setRequiredQuorumWeight] = useState(0);
+  const [quorumLoading, setQuorumLoading] = useState(true);
 
   // Spending limit proposal form state
   const [slOwner, setSlOwner] = useState("");
@@ -85,24 +93,69 @@ export function OwnersPage({
   const [slSubmitting, setSlSubmitting] = useState(false);
   const [slError, setSlError] = useState<string | null>(null);
 
-  const [weightCapPct, setWeightCapPct] = useState<number | null>(null);
-  const [quorumWeight, setQuorumWeight] = useState<number | null>(null);
+  // Derived state for weight display
+  const hasOwnerWeights =
+    !weightsLoading && Object.keys(weights).length > 0 && !weightsError;
+  const ownerWeightsLoading = weightsLoading;
+  const weightsUnavailable = !weightsLoading && !!weightsError;
+  const ownerCountLabel = `${ownerAddresses.length} ${ownerAddresses.length === 1 ? "owner" : "owners"}`;
+  const quorumPercent =
+    totalWeight > 0
+      ? ((threshold / totalWeight) * 100).toFixed(1)
+      : "0";
+  const weightsStale = false;
 
+  // Load required quorum weight for the simulator
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [capPct, qWeight] = await Promise.all([
-        getWeightCapPct(),
-        getRequiredQuorumWeight(),
-      ]);
-      if (!cancelled) {
-        setWeightCapPct(capPct);
-        setQuorumWeight(qWeight);
+      setQuorumLoading(true);
+      try {
+        const weight = await getRequiredQuorumWeight();
+        if (!cancelled) {
+          setRequiredQuorumWeight(weight);
+          setQuorumLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setRequiredQuorumWeight(0);
+          setQuorumLoading(false);
+        }
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Quorum simulator computed values
+  const selectedWeight = useMemo(() => {
+    let sum = 0;
+    for (const addr of selectedAddresses) {
+      sum += weights[addr] ?? 0;
+    }
+    return sum;
+  }, [selectedAddresses, weights]);
+
+  const quorumMet =
+    requiredQuorumWeight > 0 && selectedWeight >= requiredQuorumWeight;
+
+  function toggleSelection(address: string) {
+    setSelectedAddresses((prev) => {
+      const next = new Set(prev);
+      if (next.has(address)) {
+        next.delete(address);
+      } else {
+        next.add(address);
+      }
+      return next;
+    });
+  }
+
+  function resetSelection() {
+    setSelectedAddresses(new Set());
+  }
 
   // Load spending limits for all owners and tokens
   useEffect(() => {
@@ -139,25 +192,26 @@ export function OwnersPage({
   const quorumPercent = totalWeight > 0 ? ((threshold / totalWeight) * 100).toFixed(1) : "0";
 
   const visibleOwners = owners
-    .map((owner) => {
-      const weight = weights[owner.address] ?? 1;
-      const percentage = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
-      const isAboveCap = weightCapPct !== null && percentage > weightCapPct;
-      const meetsQuorumAlone = quorumWeight !== null && weight >= quorumWeight;
-      return { ...owner, weight, percentage, isAboveCap, meetsQuorumAlone };
+    .map((owner, idx) => {
+      const fullAddress = ownerAddresses[idx] ?? owner.address;
+      const weight = weights[fullAddress] ?? (weightsLoading ? null : 1);
+      const percentage = totalWeight > 0 && weight !== null
+        ? (weight / totalWeight) * 100
+        : 0;
+      return { ...owner, fullAddress, weight, percentage };
     })
     .sort((left, right) => {
       if (!sortByWeightDesc) return 0;
-      return right.weight - left.weight;
+      return (right.weight ?? 0) - (left.weight ?? 0);
     })
     .filter((owner) => {
       if (filterMode === "all") return true;
 
-      const threshold = Number(shareThreshold);
-      if (!Number.isFinite(threshold)) return true;
+      const thresholdVal = Number(shareThreshold);
+      if (!Number.isFinite(thresholdVal)) return true;
 
-      if (filterMode === "above") return owner.percentage > threshold;
-      return owner.percentage < threshold;
+      if (filterMode === "above") return owner.percentage > thresholdVal;
+      return owner.percentage < thresholdVal;
     });
 
   function formatLimit(
@@ -231,6 +285,8 @@ export function OwnersPage({
     }
   }
 
+  const selectedCount = selectedAddresses.size;
+
   return (
     <>
       <div className="mb-8">
@@ -246,7 +302,7 @@ export function OwnersPage({
               ? `Loading voting power across ${ownerCountLabel}...`
               : weightsUnavailable
                 ? "Voting power unavailable; owners remain visible."
-                : `${quorumPercent} of voting power must approve.`}
+                : `${quorumPercent}% of voting power must approve.`}
           </p>
           {weightsStale && (
             <p className="text-amber-400">Voting weights may be stale.</p>
@@ -255,6 +311,62 @@ export function OwnersPage({
             <p className="text-amber-400">Voting weights unavailable.</p>
           )}
         </div>
+      </div>
+
+      {/* Quorum Simulator */}
+      <div className="mb-8 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-zinc-400">
+            Quorum Simulator
+          </h2>
+          {selectedCount > 0 && (
+            <button
+              type="button"
+              onClick={resetSelection}
+              className="text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 px-2.5 py-1 rounded-lg transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+            >
+              Reset selection
+            </button>
+          )}
+        </div>
+
+        {quorumLoading ? (
+          <div className="h-5 bg-zinc-800 animate-pulse rounded-lg w-full" />
+        ) : selectedCount === 0 ? (
+          <p className="text-xs text-zinc-500">
+            Select owners below to check if their combined weight meets the
+            quorum requirement.
+          </p>
+        ) : (
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-sm text-zinc-300">
+                <span className="font-medium text-zinc-100">
+                  {selectedCount}
+                </span>{" "}
+                owner{selectedCount !== 1 ? "s" : ""} selected &mdash; combined
+                weight{" "}
+                <span className="font-mono font-medium text-zinc-100">
+                  {selectedWeight}
+                </span>{" "}
+                of{" "}
+                <span className="font-mono font-medium text-zinc-100">
+                  {requiredQuorumWeight}
+                </span>{" "}
+                required
+              </p>
+            </div>
+            <div
+              className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                quorumMet
+                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+              }`}
+            >
+              {quorumMet ? "Quorum met" : "Quorum not met"}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Weight Distribution Chart */}
@@ -388,7 +500,7 @@ export function OwnersPage({
         </div>
       </div>
 
-      {/* Owners list with spending limits */}
+      {/* Owners list with checkboxes and spending limits */}
       {owners.length === 0 ? (
         <div className="py-12 text-center">
           <p className="text-sm text-zinc-600">No owners found.</p>
@@ -401,91 +513,56 @@ export function OwnersPage({
         </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 mb-8">
-          {visibleOwners.map((owner) => (
-            <div key={owner.address}>
-              <div className="flex items-center gap-3 px-4 py-4">
+          {visibleOwners.map((owner) => {
+            const isSelected = selectedAddresses.has(owner.fullAddress);
+            return (
+              <div
+                key={owner.fullAddress}
+                className={`flex items-center gap-3 px-4 py-4 transition-colors ${
+                  isSelected ? "bg-zinc-800/50" : ""
+                }`}
+              >
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelection(owner.fullAddress)}
+                    className="accent-emerald-500 w-4 h-4"
+                    aria-label={`Select ${owner.label} for quorum simulation`}
+                  />
+                </label>
                 <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center text-xs text-zinc-400">
                   {owner.label[0]}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-zinc-300">{owner.label}</p>
-                    <div className="flex items-center gap-2">
-                      {!weightsLoading && (
-                        <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
-                          Weight: {weights[owner.address] ?? 1}
-                        </span>
-                      )}
-                      {owner.meetsQuorumAlone && (
-                        <span
-                          className="group relative text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full font-medium cursor-help"
-                          title="This owner's weight alone meets or exceeds the quorum requirement, meaning they can approve and execute any proposal unilaterally. Consider rebalancing weights or raising the quorum threshold."
-                        >
-                          ⚠ Single-owner quorum
-                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-zinc-200 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                            This owner's weight alone meets or exceeds the quorum requirement, meaning they can approve and execute any proposal unilaterally. Consider rebalancing weights or raising the quorum threshold.
-                          </span>
-                        </span>
-                      )}
-                      {!owner.meetsQuorumAlone && owner.isAboveCap && (
-                        <span
-                          className="group relative text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium cursor-help"
-                          title="This owner's voting weight exceeds the configured single-owner weight cap. A single compromised key would give them outsized control over the multisig."
-                        >
-                          ⚠ Above weight cap
-                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-zinc-200 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                            This owner's voting weight exceeds the configured single-owner weight cap. A single compromised key would give them outsized control over the multisig.
-                          </span>
-                        </span>
-                      )}
-                    </div>
+                    {ownerWeightsLoading ? (
+                      <span className="text-xs text-zinc-500">
+                        Loading weight...
+                      </span>
+                    ) : weightsUnavailable ? (
+                      <span className="text-xs text-red-400">
+                        Weight unavailable
+                      </span>
+                    ) : (
+                      <span className="text-xs text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-full font-mono">
+                        Weight {owner.weight}
+                      </span>
+                    )}
                   </div>
                   <p className="font-mono text-xs text-zinc-500">
                     {shortenAddr(owner.address)}
-                    {!weightsLoading && (
+                    {!ownerWeightsLoading && !weightsUnavailable && (
                       <span className="text-xs text-zinc-400 ml-2">
-                        · weight {weights[owner.address] ?? 1}
+                        &middot; {owner.percentage.toFixed(1)}% of voting power
                       </span>
                     )}
                   </p>
                 </div>
               </div>
-
-              {/* Spending limits per token */}
-              {limitsLoading ? (
-                <div className="px-4 pb-4">
-                  <div className="h-4 w-32 bg-zinc-800 animate-pulse rounded" />
-                </div>
-              ) : (
-                <div className="px-4 pb-4 pl-14 grid grid-cols-3 gap-2">
-                  {TOKEN_SYMBOLS.map((symbol) => {
-                    const limit = spendingLimits[owner.address]?.[symbol];
-                    const info =
-                      limit !== undefined
-                        ? formatLimit(limit, symbol)
-                        : { text: "—", variant: "unrestricted" as const };
-
-                    const variantStyles = {
-                      unrestricted: "text-zinc-500",
-                      zero: "text-red-400",
-                      configured: "text-emerald-400",
-                    };
-
-                    return (
-                      <div key={symbol} className="text-xs">
-                        <span className="text-zinc-600">{symbol}: </span>
-                        <span
-                          className={`font-mono ${variantStyles[info.variant]}`}
-                        >
-                          {info.text}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
