@@ -218,11 +218,14 @@ export function OwnersPage({
           <p>
             {ownerWeightsLoading
               ? `Loading voting power across ${ownerCountLabel}...`
-              : ownerWeightsError
+              : weightsUnavailable
                 ? "Voting power unavailable; owners remain visible."
                 : `${quorumPercent} of voting power must approve.`}
           </p>
-          {ownerWeightsError && (
+          {weightsStale && (
+            <p className="text-amber-400">Voting weights may be stale.</p>
+          )}
+          {weightsUnavailable && (
             <p className="text-amber-400">Voting weights unavailable.</p>
           )}
         </div>

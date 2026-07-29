@@ -73,6 +73,7 @@ export function useOwnerWeights(ownerAddresses: string[]) {
 
     return () => {
       cancelled = true;
+      clearInterval(intervalId);
     };
   }, [ownerAddresses]);
 
