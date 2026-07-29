@@ -1784,14 +1784,27 @@ impl AccordContract {
                 if !(MIN_OWNER_WEIGHT..=MAX_OWNER_WEIGHT).contains(weight) {
                     return Err(ContractError::InvalidWeight);
                 }
+
+                let owners = read_owners_map(&env)?;
+                let prev_count = owners.len();
+
+                // Re-check at execute time: adding an owner must not push the
+                // owner count past MAX_OWNERS (20). The creation-time check
+                // in create_add_owner_proposal only validates against the
+                // owner count at proposal creation — a concurrent AddOwner
+                // proposal executed beforehand could have already filled the
+                // last slot.
+                if prev_count >= MAX_OWNERS {
+                    return Err(ContractError::InvalidOwners);
+                }
+
                 let current_total = read_total_weight(&env);
                 let new_total = checked_weight_add(current_total, *weight)?;
                 if !owner_weight_within_cap(&env, *weight, new_total) {
                     return Err(ContractError::SingleOwnerWeightCapExceeded);
                 }
 
-                let mut owners = read_owners_map(&env)?;
-                let prev_count = owners.len();
+                let mut owners = owners;
                 owners.set(new_owner.clone(), *weight);
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
@@ -1840,7 +1853,6 @@ impl AccordContract {
                         }
                     }
                 }
-
                 owners.remove(owner_to_remove.clone());
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
@@ -1850,6 +1862,32 @@ impl AccordContract {
                     &env,
                     resulting_total_weight,
                 );
+
+                // Remove the removed owner's approval weight from all
+                // Pending and Ready proposals they previously approved.
+                // Without this, a removed owner's prior votes would
+                // continue counting toward the threshold even after
+                // they are no longer an owner — undermining the M-of-N
+                // model. Terminal proposals (Executed, Expired, Revoked)
+                // are left untouched since their outcome is final.
+                let next_id: u64 = env.storage()
+                    .instance()
+                    .get(&next_id_key())
+                    .unwrap_or(1_u64);
+                for pid in 1_u64..next_id {
+                    if let Ok(mut p) = read_proposal(&env, pid) {
+                        let derived = derive_status(&env, &p);
+                        if matches!(derived, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && read_approval(&env, pid, owner_to_remove)
+                        {
+                            write_approval(&env, pid, owner_to_remove, false);
+                            p.approvals = checked_weight_sub(p.approvals, weight)?;
+                            p.approval_weight = checked_weight_sub(p.approval_weight, weight)?;
+                            p.status = derive_status(&env, &p);
+                            write_proposal(&env, &p);
+                        }
+                    }
+                }
 
                 env.events().publish(
                     (symbol_short!("r_own"),),
