@@ -309,6 +309,16 @@ Returns every current owner's address paired with their voting weight, in a sing
 
 **Errors:** `NotInitialized`
 
+### JavaScript SDK example
+
+```js
+const ownerWeights = await contract.call("get_owner_weights");
+```
+
+In practice, frontends should use this view instead of calling `get_owner_weight` once per owner when they need the full set of weights for a governance overview or owners list.
+
+> Pagination was intentionally deferred for this view because the owner set is capped at 20 (`MAX_OWNERS`), so a single call already returns the entire current owner-weight snapshot without introducing extra complexity.
+
 ---
 
 ## `has_approved`

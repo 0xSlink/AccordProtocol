@@ -5939,6 +5939,55 @@ fn get_owner_weights_returns_all_owners_with_correct_weights() {
     assert_eq!(sum, client.get_total_weight());
 }
 
+/// A single-owner multisig must return one entry with that owner's weight.
+#[test]
+fn get_owner_weights_returns_single_owner_weight() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let mut owners = Vec::new(&env);
+    owners.push_back(owner.clone());
+    let mut weights = Vec::new(&env);
+    weights.push_back(7_u32);
+    client.initialize(&owners, &weights, &1, &0);
+
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap().owner, owner);
+    assert_eq!(result.get(0).unwrap().weight, 7);
+}
+
+/// The bulk view should also handle the MAX_OWNERS boundary without missing
+/// any owners or changing their weights.
+#[test]
+fn get_owner_weights_returns_all_owners_at_max_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    let mut owners = Vec::new(&env);
+    let mut weights = Vec::new(&env);
+    for i in 0..MAX_OWNERS {
+        let owner = Address::generate(&env);
+        owners.push_back(owner.clone());
+        weights.push_back((i + 1) as u32);
+    }
+
+    client.initialize(&owners, &weights, &1, &0);
+
+    let result = client.get_owner_weights();
+    assert_eq!(result.len(), MAX_OWNERS as usize);
+    let mut sum: u32 = 0;
+    for entry in result.iter() {
+        sum = sum.checked_add(entry.weight).unwrap();
+    }
+    assert_eq!(sum, client.get_total_weight());
+}
+
 /// After adding and then removing an owner, get_owner_weights must reflect
 /// the current set and the total-weight counter must still match.
 #[test]

@@ -2094,6 +2094,18 @@ impl AccordContract {
         owners.get(owner).ok_or(ContractError::OwnerNotFound)
     }
 
+    /// Returns every current owner's address paired with their voting weight,
+    /// in a single call. Read-only; no authorization required.
+    pub fn get_owner_weights(env: Env) -> Result<Vec<OwnerWeight>, ContractError> {
+        let owners = read_owners_map(&env)?;
+        let mut result = Vec::new(&env);
+        for owner in owners.keys().iter() {
+            let weight = owners.get(owner.clone()).unwrap_or(0);
+            result.push_back(OwnerWeight { owner, weight });
+        }
+        Ok(result)
+    }
+
     /// Returns the configured maximum percentage of total weight that one owner
     /// may receive through a ChangeOwnerWeight proposal.
     pub fn get_max_single_owner_weight_pct(env: Env) -> u32 {
@@ -2165,19 +2177,6 @@ impl AccordContract {
     /// Returns all current owners.
     pub fn get_owners(env: Env) -> Result<Vec<Address>, ContractError> {
         Ok(read_owners_map(&env)?.keys())
-    }
-
-    /// Returns every current owner's address paired with their voting weight,
-    /// in a single call. The sum of the returned weights equals the current
-    /// total-weight counter. Read-only; no authorization required.
-    pub fn get_owner_weights(env: Env) -> Result<Vec<OwnerWeight>, ContractError> {
-        let owners = read_owners_map(&env)?;
-        let mut result = Vec::new(&env);
-        for owner in owners.keys().iter() {
-            let weight = owners.get(owner.clone()).unwrap_or(0);
-            result.push_back(OwnerWeight { owner, weight });
-        }
-        Ok(result)
     }
 
     /// Returns the spending limit for an (owner, token) pair, or `None` if no

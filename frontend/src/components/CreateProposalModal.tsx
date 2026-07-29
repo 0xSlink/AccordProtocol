@@ -10,7 +10,7 @@ import {
 import {
   getOwners,
   getThreshold,
-  getOwnerWeight,
+  getOwnerWeights,
   getTotalWeight,
   getRequiredQuorumWeight,
   getWeightCapPct,
@@ -193,12 +193,14 @@ export function CreateProposalModal({ walletAddress, onClose, onSubmitted, trigg
 
         const weightMap: Record<string, number> = {};
         let computedSum = 0;
-        for (const addr of ownerAddrs) {
-          try {
-            const w = await getOwnerWeight(addr);
-            weightMap[addr] = w;
-            computedSum += w;
-          } catch {
+        try {
+          const ownerWeights = await getOwnerWeights();
+          for (const entry of ownerWeights) {
+            weightMap[entry.address] = entry.weight;
+            computedSum += entry.weight;
+          }
+        } catch {
+          for (const addr of ownerAddrs) {
             weightMap[addr] = 1;
             computedSum += 1;
           }
