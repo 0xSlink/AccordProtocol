@@ -1,5 +1,13 @@
 import { expect, test, describe } from "vitest";
-import { stroopsToDisplay, displayToStroops, contractErrorMessage, formatDeadline, shortenAddr } from "../soroban";
+import {
+  stroopsToDisplay,
+  displayToStroops,
+  weightToPercent,
+  formatWeightPercent,
+  contractErrorMessage,
+  formatDeadline,
+  shortenAddr,
+} from "../soroban";
 
 describe("stroopsToDisplay", () => {
   test("zero", () => {
@@ -38,6 +46,42 @@ describe("displayToStroops", () => {
 
   test("large values", () => {
     expect(displayToStroops(1000000000)).toBe(10000000000000000n);
+  });
+});
+
+describe("weightToPercent", () => {
+  test("returns the owner share for a normal weight", () => {
+    expect(weightToPercent(5, 20)).toBe(25);
+  });
+
+  test("returns zero for a zero-weight owner", () => {
+    expect(weightToPercent(0, 20)).toBe(0);
+  });
+
+  test("returns 100 for a single-owner total", () => {
+    expect(weightToPercent(7, 7)).toBe(100);
+  });
+
+  test("returns zero when total weight is zero", () => {
+    expect(weightToPercent(5, 0)).toBe(0);
+  });
+});
+
+describe("formatWeightPercent", () => {
+  test("formats a normal weight share with one decimal place", () => {
+    expect(formatWeightPercent(5, 20)).toBe("25.0%");
+  });
+
+  test("formats a zero-weight owner", () => {
+    expect(formatWeightPercent(0, 20)).toBe("0.0%");
+  });
+
+  test("formats a 100-percent single-owner share", () => {
+    expect(formatWeightPercent(7, 7)).toBe("100.0%");
+  });
+
+  test("formats zero when total weight is zero", () => {
+    expect(formatWeightPercent(5, 0)).toBe("0.0%");
   });
 });
 

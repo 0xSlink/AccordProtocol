@@ -24,6 +24,15 @@ export function displayToStroops(value: number): bigint {
   return BigInt(Math.round(value * 10_000_000));
 }
 
+export function weightToPercent(weight: number, totalWeight: number): number {
+  if (totalWeight === 0) return 0;
+  return (weight / totalWeight) * 100;
+}
+
+export function formatWeightPercent(weight: number, totalWeight: number): string {
+  return `${weightToPercent(weight, totalWeight).toFixed(1)}%`;
+}
+
 const CONTRACT_ERRORS: Record<string, string> = {
   "1": "Contract is already initialized.",
   "2": "Contract has not been initialized.",
