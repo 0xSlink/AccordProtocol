@@ -167,10 +167,24 @@ export function OwnersPage({
   return (
     <>
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold mb-2">Multisig Owners</h1>
-        <p className="text-zinc-400 text-sm">
-          Requires {threshold} of {totalOwners} signers
-        </p>
+        <h1 className="mb-2 text-2xl font-semibold">Multisig Owners</h1>
+        <div className="space-y-1 text-sm text-zinc-400">
+          <p>
+            {hasOwnerWeights
+              ? `Requires ${threshold} of ${totalWeight} voting weight`
+              : `Requires ${threshold} voting weight`}
+          </p>
+          <p>
+            {ownerWeightsLoading
+              ? `Loading voting power across ${ownerCountLabel}...`
+              : ownerWeightsError
+                ? "Voting power unavailable; owners remain visible."
+                : `${quorumPercent} of voting power must approve.`}
+          </p>
+          {ownerWeightsError && (
+            <p className="text-amber-400">Voting weights unavailable.</p>
+          )}
+        </div>
       </div>
 
       {/* Weight Distribution Chart */}
@@ -235,8 +249,8 @@ export function OwnersPage({
 
       {/* Owners list with spending limits */}
       {owners.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-zinc-600 text-sm">No owners found.</p>
+        <div className="py-12 text-center">
+          <p className="text-sm text-zinc-600">No owners found.</p>
         </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 mb-8">
