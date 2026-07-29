@@ -416,7 +416,42 @@ Frontend utilities should live in `frontend/src/lib/soroban.ts`:
 - `toBaseUnit(amount: string, decimals: number): bigint`
 - `fromBaseUnit(amount: bigint, decimals: number): string`
 
-## 9. Related Documents
+## 9. Token Deposit Flow
+
+The Accord contract does not automatically pull tokens from owner wallets. It only holds whatever tokens have been sent directly to its own contract address — and only discovers a shortfall when execution is attempted.
+
+### 9.1 Deposit Pattern
+
+Owners (or anyone) must deposit tokens into the contract's address **before** a proposal referencing that token can be successfully executed. Depositing is a standard wallet transfer: send tokens to the contract's Stellar address the same way you would send tokens to any other account. There is no special contract function to call — the contract simply holds a balance in the same way any Stellar account does, using the network's native account model.
+
+Each deposit should cover the full `amount` of the intended proposal (or multiple proposals). If multiple proposals reference different token contracts, each token needs a separate deposit to the same contract address.
+
+### 9.2 Execute-Time Balance Check
+
+There is **no balance check at proposal creation time**. The `create_proposal` function validates the token contract address (`validate_token`) and the amount (`amount ≥ 1`), but it never queries the contract's own token balance. A proposal can be created, approved by all owners, and reach `Ready` status even if the contract holds zero of the required token.
+
+The balance is checked only at the moment of execution. When `execute` is called, the contract calls the token's `transfer` function directly from its own address to the recipient (`contracts/accord/src/lib.rs:1407–1416`):
+
+```rust
+token::Client::new(&env, &transfer.token)
+    .try_transfer(&env.current_contract_address(), &transfer.to, &transfer.amount)
+```
+
+If the contract's balance is too low, this cross-contract call fails and the entire `execute` call reverts with **`ContractError::TransferFailed`** (error code 15). See [`CONTRACT_API.md`](CONTRACT_API.md#error-reference) for the full error description.
+
+Because the failure happens inside the token contract's transfer logic — not in Accord's own validation — the error surfaces as a generic transfer failure rather than a specific "insufficient balance" error. The frontend maps this to the message *"Token transfer failed. Check the contract balance."* (`frontend/src/lib/soroban.ts:42`).
+
+### 9.3 Frontend Integration
+
+The Settings page (`frontend/src/pages/SettingsPage.tsx`) includes a **"Fund Contract"** panel that shows the contract's current token balances and its address with a copy button. Owners use this panel to:
+
+1. **View the contract's address** — displayed at the top of the Settings page with a copy button (`SettingsPage.tsx:212–224`).
+2. **Check current balances** — the "Fund Contract" panel shows XLM and USDC balances side-by-side (`SettingsPage.tsx:440–472`), loaded via `getContractXlmBalance()` and `getContractUsdcBalance()` from `frontend/src/lib/contract.ts`.
+3. **Send a deposit** — copy the contract address, use any Stellar wallet (Freighter, Lobstr, etc.) to send the required tokens to that address, then return to the proposal and execute it.
+
+The same panel also serves as a diagnostic tool: if an execute call fails with `TransferFailed`, an owner can check this panel to confirm the balance is sufficient before retrying.
+
+## 10. Related Documents
 
 | Document                                                                  | Description                                                    |
 | ------------------------------------------------------------------------- | -------------------------------------------------------------- |
