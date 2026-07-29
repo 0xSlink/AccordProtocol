@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Proposal } from "../types/accord";
+import type { Proposal, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
 import { StatusBadge } from "./StatusBadge";
 import { Check, Copy, Link2 } from "lucide-react";
@@ -11,6 +11,77 @@ type ProposalCardProps = {
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
 };
+
+const KIND_LABELS = {
+  transfer: { title: "Transfer", badge: "Payment" },
+  add_owner: { title: "Add Owner", badge: "Governance" },
+  remove_owner: { title: "Remove Owner", badge: "Governance" },
+  change_threshold: { title: "Change Threshold", badge: "Governance" },
+  set_spending_limit: { title: "Set Spending Limit", badge: "Policy" },
+  change_owner_weight: { title: "Change Weight", badge: "Governance" },
+} satisfies Record<ProposalKind, { title: string; badge: string }>;
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled proposal kind: ${value}`);
+}
+
+function KindSummary({ proposal }: { proposal: Proposal }) {
+  switch (proposal.kind) {
+    case "transfer":
+      return (
+        <>
+          <p className="text-sm text-zinc-300">
+            Send {proposal.amount} {proposal.token}
+          </p>
+          <p className="mt-0.5 font-mono text-sm text-zinc-500">
+            To {proposal.to}
+          </p>
+        </>
+      );
+    case "add_owner":
+      return (
+        <p className="mt-0.5 font-mono text-sm text-zinc-500">
+          Owner {proposal.to}
+        </p>
+      );
+    case "remove_owner":
+      return (
+        <p className="mt-0.5 font-mono text-sm text-zinc-500">
+          Owner {proposal.to}
+        </p>
+      );
+    case "change_threshold":
+      return (
+        <p className="mt-0.5 text-sm text-zinc-500">
+          New threshold: {proposal.to}
+        </p>
+      );
+    case "set_spending_limit":
+      return (
+        <>
+          <p className="mt-0.5 font-mono text-sm text-zinc-500">
+            Owner {proposal.to}
+          </p>
+          <p className="text-sm text-zinc-500">
+            Limit {proposal.amount} for {proposal.token}
+          </p>
+        </>
+      );
+    case "change_owner_weight":
+      return (
+        <>
+          <p className="mt-0.5 font-mono text-sm text-zinc-500">
+            Owner {proposal.to}
+          </p>
+          <p className="text-sm text-zinc-500">
+            New weight: {proposal.amount}
+          </p>
+        </>
+      );
+    default:
+      return assertNever(proposal.kind);
+  }
+}
 
 export function ProposalCard({
   proposal,
@@ -24,6 +95,7 @@ export function ProposalCard({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedProposer, setCopiedProposer] = useState(false);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const labels = KIND_LABELS[proposal.kind];
 
   useEffect(() => {
     if (!copiedLink) return;
@@ -72,16 +144,16 @@ export function ProposalCard({
           <p className="text-xs text-zinc-500 font-mono mb-1">
             Proposal #{proposal.id}
           </p>
-          <p className="text-white font-semibold">
-            Send {proposal.amount} {proposal.token}
-          </p>
-          <p className="text-zinc-500 text-sm font-mono mt-0.5">
-            → {proposal.to}
-          </p>
-          {/* The proposer's address */}
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-white font-semibold">{labels.title}</p>
+            <span className="rounded-md border border-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+              {labels.badge}
+            </span>
+          </div>
+          <KindSummary proposal={proposal} />
           <div className="flex items-center gap-2 mt-0.5">
             <p className="text-zinc-500 text-sm font-mono">
-              Proposed by → {proposal.proposer.slice(0, 6)}...
+              Proposed by -&gt; {proposal.proposer.slice(0, 6)}...
               {proposal.proposer.slice(-4)}
             </p>
 
@@ -132,9 +204,9 @@ export function ProposalCard({
       </div>
 
       <div className="flex items-center justify-between mt-4">
-        <ApprovalBar 
-          approvals={proposal.approvals} 
-          threshold={proposal.threshold} 
+        <ApprovalBar
+          approvals={proposal.approvals}
+          threshold={proposal.threshold}
           approverAddresses={proposal.approverAddresses}
         />
 

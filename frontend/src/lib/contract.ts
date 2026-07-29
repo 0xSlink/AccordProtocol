@@ -12,7 +12,7 @@ import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
 const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ADDRESS as string;
 const NETWORK_PASSPHRASE = import.meta.env.VITE_NETWORK_PASSPHRASE as string;
-// Any funded testnet account — used only to build simulation transactions (no signing).
+// Any funded testnet account - used only to build simulation transactions (no signing).
 const SIM_SOURCE = import.meta.env.VITE_SIM_SOURCE as string;
 
 const server = new rpc.Server(RPC_URL);
@@ -64,9 +64,12 @@ function safeBigInt(value: unknown): bigint {
   }
 }
 
-function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"> {
+function mapKindDetails(
+  kind: unknown
+): Pick<Proposal, "kind" | "to" | "amount" | "token"> {
   if (!kind || typeof kind !== "object") {
     return {
+      kind: "transfer",
       to: "Unknown",
       amount: "0",
       token: "Unknown",
@@ -80,30 +83,49 @@ function mapKindDetails(kind: unknown): Pick<Proposal, "to" | "amount" | "token"
   switch (normalizedVariant) {
     case "transfer":
       return {
+        kind: "transfer",
         to: shortenAddr(String(values[0] ?? "Unknown")),
         amount: stroopsToDisplay(safeBigInt(values[1])),
         token: shortenAddr(String(values[2] ?? "Unknown")),
       };
     case "addowner":
       return {
+        kind: "add_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
-        amount: "—",
+        amount: "-",
         token: "Add owner",
       };
     case "removeowner":
       return {
+        kind: "remove_owner",
         to: shortenAddr(String(values[0] ?? "Unknown")),
-        amount: "—",
+        amount: "-",
         token: "Remove owner",
       };
     case "changethreshold":
       return {
+        kind: "change_threshold",
         to: `${values[0] ?? "Unknown"} approvals`,
-        amount: "—",
+        amount: "-",
         token: "Threshold",
+      };
+    case "setspendinglimit":
+      return {
+        kind: "set_spending_limit",
+        to: shortenAddr(String(values[0] ?? "Unknown")),
+        amount: String(values[2] ?? "Unknown"),
+        token: shortenAddr(String(values[1] ?? "Unknown")),
+      };
+    case "changeownerweight":
+      return {
+        kind: "change_owner_weight",
+        to: shortenAddr(String(values[0] ?? "Unknown")),
+        amount: String(values[1] ?? "Unknown"),
+        token: "Owner weight",
       };
     default:
       return {
+        kind: "transfer",
         to: "Unknown",
         amount: "0",
         token: "Unknown",
@@ -118,6 +140,7 @@ export function mapProposal(raw: any, threshold: number): Proposal {
 
   return {
     id: Number(raw.id),
+    kind: details.kind,
     to: details.to,
     amount: details.amount,
     token: details.token,
@@ -214,8 +237,7 @@ export async function getContractEvents(fromLedger: number): Promise<number> {
 export async function getApprovers(proposalId: number): Promise<string[]> {
   try {
     const owners = await getOwners();
-    
-    // Check all owners in parallel
+
     const checks = await Promise.all(
       owners.map(async (owner) => {
         const approved = await hasApproved(owner, proposalId);
@@ -223,7 +245,6 @@ export async function getApprovers(proposalId: number): Promise<string[]> {
       })
     );
 
-    // Keep only the ones who approved
     return checks.filter((c) => c.approved).map((c) => c.owner);
   } catch (error) {
     console.error(`Failed to get approvers for proposal ${proposalId}:`, error);

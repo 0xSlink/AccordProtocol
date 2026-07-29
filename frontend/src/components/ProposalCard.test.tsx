@@ -19,6 +19,7 @@ vi.mock("../hooks/useContract", () => ({
 
 const baseProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   id: 42,
+  kind: "transfer",
   to: "GABCDE...WXYZ",
   amount: "100",
   token: "USDC",
@@ -31,6 +32,7 @@ const baseProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   createdAt: "proposal #42",
   proposer: "GPROPO...SER1",
   userHasApproved: false,
+  approverAddresses: [],
   ...overrides,
 });
 
@@ -160,5 +162,27 @@ describe("ProposalCard", () => {
       screen.getByRole("button", { name: /copy proposal link/i })
     ).toBeTruthy();
     vi.useRealTimers();
+  });
+
+  test("renders change-owner-weight proposals with governance summary", () => {
+    render(
+      <ProposalCard
+        proposal={baseProposal({
+          kind: "change_owner_weight",
+          to: "GOWNER...R111",
+          amount: "25",
+          token: "Owner weight",
+        })}
+        walletAddress="GCONNECTED123"
+        onApprove={vi.fn()}
+        onExecute={vi.fn()}
+        onRevoke={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Change Weight")).toBeTruthy();
+    expect(screen.getByText("Governance")).toBeTruthy();
+    expect(screen.getByText("Owner GOWNER...R111")).toBeTruthy();
+    expect(screen.getByText("New weight: 25")).toBeTruthy();
   });
 });
