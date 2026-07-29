@@ -1,6 +1,6 @@
 // Issue #87: dedicated validation module for proposal and approval logic
+use crate::{ContractError, MAX_DESCRIPTION_LEN, MAX_PROPOSAL_DURATION, MIN_AMOUNT};
 use soroban_sdk::{Address, Env, String};
-use crate::{ContractError, MAX_DESCRIPTION_LEN, MIN_AMOUNT, MAX_PROPOSAL_DURATION};
 
 pub fn validate_amount(amount: i128) -> Result<(), ContractError> {
     if amount < MIN_AMOUNT {
@@ -21,7 +21,7 @@ pub fn validate_deadline(env: &Env, deadline: u64) -> Result<(), ContractError> 
 }
 
 pub fn validate_description(description: &String) -> Result<(), ContractError> {
-    if description.len() == 0 {
+    if description.is_empty() {
         return Err(ContractError::EmptyDescription);
     }
     if description.len() > MAX_DESCRIPTION_LEN {

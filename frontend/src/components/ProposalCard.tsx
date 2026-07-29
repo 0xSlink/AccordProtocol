@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { Proposal } from "../types/accord";
+import type { Proposal, ProposalCategory, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
 import { StatusBadge } from "./StatusBadge";
 import { Check, Copy, Link2 } from "lucide-react";
+import { shortenAddr } from "../lib/soroban";
 
 type ProposalCardProps = {
   proposal: Proposal;
@@ -11,14 +12,130 @@ type ProposalCardProps = {
   onApprove: (id: number) => void;
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
+  // weight-based props (new)
+  approvalWeight?: number;
+  quorumWeight?: number;
+  totalWeight?: number;
+  ownerWeights?: Record<string, number>;
 };
 
-export function ProposalCard({
+const KIND_LABELS: Record<ProposalKind, { title: string; badge: string }> = {
+  transfer: { title: "Send", badge: "Transfer" },
+  add_owner: { title: "Add Owner", badge: "Governance" },
+  remove_owner: { title: "Remove Owner", badge: "Governance" },
+  change_threshold: { title: "Change Threshold", badge: "Governance" },
+  set_spending_limit: { title: "Set Spending Limit", badge: "Spending Limit" },
+};
+
+// Colour palette per category, mirroring the pill styling used by StatusBadge.
+const CATEGORY_STYLES: Record<ProposalCategory, string> = {
+  transfer: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+  payroll: "bg-violet-500/10 text-violet-400 border border-violet-500/20",
+  grant: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+  ops: "bg-sky-500/10 text-sky-400 border border-sky-500/20",
+  other: "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20",
+};
+
+function KindSummary({ proposal }: { proposal: Proposal }): ReactNode {
+  const { kind } = proposal;
+
+  switch (kind) {
+    case "transfer":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Send {proposal.amount} {proposal.token}
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "add_owner":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Add Owner
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            New owner →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "remove_owner":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Remove Owner
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Remove →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+          </p>
+        </>
+      );
+    case "change_threshold":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Change Threshold
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Require → {proposal.to}
+          </p>
+        </>
+      );
+    case "set_spending_limit":
+      return (
+        <>
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            Set Spending Limit
+          </Link>
+          <p className="text-zinc-500 text-sm font-mono mt-0.5">
+            Owner →{" "}
+            <span className="inline-block max-w-[180px] truncate align-bottom">
+              {proposal.to}
+            </span>
+            , Limit → {proposal.amount} {proposal.token}
+          </p>
+        </>
+      );
+  }
+}
+
+export const ProposalCard = React.memo(function ProposalCard({
   proposal,
   walletAddress,
   onApprove,
   onExecute,
   onRevoke,
+  approvalWeight = 0,
+  quorumWeight = 0,
+  totalWeight = 0,
+  ownerWeights = {},
 }: ProposalCardProps) {
   const connected = !!walletAddress;
   const showApprove = proposal.status === "pending" && !proposal.userHasApproved;
@@ -70,27 +187,31 @@ export function ProposalCard({
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 hover:border-zinc-700 transition-colors">
       <div className="flex items-start justify-between mb-4 gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-zinc-500 font-mono mb-1">
-            Proposal #{proposal.id}
-          </p>
-          <Link
-            to={`/proposals/${proposal.id}`}
-            className="font-semibold text-white transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
-          >
-            Send {proposal.amount} {proposal.token}
-          </Link>
-          <p className="text-zinc-500 text-sm font-mono mt-0.5">
-            →{" "}
-            <span className="inline-block max-w-[180px] truncate align-bottom">
-              {proposal.to}
-            </span>
-          </p>
-          {/* The proposer's address */}
-          <div className="flex items-center gap-2 mt-0.5">
-            <p className="text-zinc-500 text-sm font-mono">
-              Proposed by → {proposal.proposer.slice(0, 6)}...
-              {proposal.proposer.slice(-4)}
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-xs text-zinc-500 font-mono">
+              Proposal #{proposal.id}
             </p>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
+              {KIND_LABELS[proposal.kind].badge}
+            </span>
+          </div>
+          <KindSummary proposal={proposal} />
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2">
+              <p className="text-zinc-500 text-sm font-mono">
+                Proposed by → {shortenAddr(proposal.proposer)}
+              </p>
+              {(() => {
+                // Find full owner address that matches the shortened proposer string
+                const ownerAddr = Object.keys(ownerWeights).find((a) => shortenAddr(a) === proposal.proposer);
+                if (ownerAddr) {
+                  return (
+                    <span className="text-xs text-zinc-400 ml-1">· weight {ownerWeights[ownerAddr]}</span>
+                  );
+                }
+                return null;
+              })()}
+            </div>
 
             <button
               type="button"
@@ -140,15 +261,22 @@ export function ProposalCard({
               <Link2 size={16} />
             )}
           </button>
+          <span
+            role="note"
+            aria-label={`Category: ${proposal.category}`}
+            className={`text-xs px-2 py-0.5 rounded-full font-mono capitalize ${CATEGORY_STYLES[proposal.category]}`}
+          >
+            {proposal.category}
+          </span>
           <StatusBadge status={proposal.status} />
         </div>
       </div>
 
       <div className="flex items-center justify-between mt-4">
-        <ApprovalBar 
-          approvals={proposal.approvals} 
-          threshold={proposal.threshold} 
-          approverAddresses={proposal.approverAddresses}
+        <ApprovalBar
+          approvalWeight={approvalWeight ?? 0}
+          quorumWeight={quorumWeight ?? proposal.threshold}
+          totalWeight={totalWeight ?? 0}
         />
 
         <div className="flex items-center gap-2">
@@ -213,4 +341,4 @@ export function ProposalCard({
       </div>
     </div>
   );
-}
+});

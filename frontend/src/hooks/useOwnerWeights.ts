@@ -1,73 +1,81 @@
 import { useEffect, useState } from "react";
-import { getOwnerWeights } from "../lib/contract";
-import type { OwnerWeight } from "../types/accord";
+import { getOwnerWeight } from "../lib/contract";
 
-export const OWNER_WEIGHTS_REFRESH_INTERVAL_MS = 5000;
-
-export type OwnerWeightsState = {
-  ownerWeights: OwnerWeight[];
+type OwnerWeightState = {
+  weights: Record<string, number>;
+  totalWeight: number;
   loading: boolean;
   error: string | null;
 };
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Failed to load owner weights";
-}
-
-export function useOwnerWeights(
-  intervalMs = OWNER_WEIGHTS_REFRESH_INTERVAL_MS,
-): OwnerWeightsState {
-  const [state, setState] = useState<OwnerWeightsState>({
-    ownerWeights: [],
-    loading: true,
+export function useOwnerWeights(ownerAddresses: string[]) {
+  const [state, setState] = useState<OwnerWeightState>({
+    weights: {},
+    totalWeight: 0,
+    loading: ownerAddresses.length > 0,
     error: null,
   });
 
   useEffect(() => {
     let cancelled = false;
-    let inFlight = false;
-
-    async function fetchWeights() {
-      if (inFlight) {
-        return;
-      }
-
-      inFlight = true;
-
-      try {
-        const ownerWeights = await getOwnerWeights();
-
+    if (ownerAddresses.length === 0) {
+      const timer = setTimeout(() => {
         if (!cancelled) {
           setState({
-            ownerWeights,
+            weights: {},
+            totalWeight: 0,
             loading: false,
             error: null,
           });
         }
-      } catch (err) {
-        console.error("Failed to fetch owner weights", err);
+      }, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+      };
+    }
 
-        if (!cancelled) {
-          setState((prev) => ({
-            ...prev,
-            loading: false,
-            error: errorMessage(err),
-          }));
+    async function fetchWeights() {
+      setState((s: OwnerWeightState) => ({ ...s, loading: true, error: null }));
+      try {
+        const weightPromises = ownerAddresses.map((addr) =>
+          getOwnerWeight(addr).then((w) => ({ address: addr, weight: w }))
+        );
+        const results = await Promise.all(weightPromises);
+        if (cancelled) return;
+
+        const weightMap: Record<string, number> = {};
+        let sum = 0;
+        for (const res of results) {
+          weightMap[res.address] = res.weight;
+          sum += res.weight;
         }
-      } finally {
-        inFlight = false;
+
+        setState({
+          weights: weightMap,
+          totalWeight: sum,
+          loading: false,
+          error: null,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setState({
+            weights: {},
+            totalWeight: 0,
+            loading: false,
+            error: err instanceof Error ? err.message : "Failed to fetch owner weights",
+          });
+        }
       }
     }
 
     fetchWeights();
 
-    const intervalId = setInterval(fetchWeights, intervalMs);
-
     return () => {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [intervalMs]);
+  }, [ownerAddresses]);
 
   return state;
 }

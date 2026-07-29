@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Proposal, ProposalStatus } from "../types/accord";
+import type { Proposal, ProposalCategory, ProposalStatus } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import {
   getProposalsPaged,
@@ -9,6 +9,7 @@ import {
 } from "../lib/contract";
 
 type Filter = "all" | ProposalStatus;
+type CategoryFilter = "all" | ProposalCategory;
 
 const TABS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -19,6 +20,15 @@ const TABS: { key: Filter; label: string }[] = [
   { key: "revoked", label: "Revoked" },
 ];
 
+const CATEGORY_OPTIONS: { key: CategoryFilter; label: string }[] = [
+  { key: "all", label: "All Categories" },
+  { key: "transfer", label: "Transfer" },
+  { key: "payroll", label: "Payroll" },
+  { key: "grant", label: "Grant" },
+  { key: "ops", label: "Ops" },
+  { key: "other", label: "Other" },
+];
+
 export function HistoryPage({
   proposals,
   onApprove,
@@ -27,6 +37,7 @@ export function HistoryPage({
   onApprove: (id: number) => void;
 }) {
   const [activeTab, setActiveTab] = useState<Filter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [proposerFilter, setProposerFilter] = useState("");
   const [displayedProposals, setDisplayedProposals] = useState<Proposal[]>(proposals);
@@ -86,6 +97,7 @@ export function HistoryPage({
 
   const filteredProposals = displayedProposals
     .filter((p) => activeTab === "all" || p.status === activeTab)
+    .filter((p) => categoryFilter === "all" || p.category === categoryFilter)
     .filter((p) =>
       p.description.toLowerCase().includes(searchTerm.toLowerCase())
     )
@@ -95,11 +107,58 @@ export function HistoryPage({
         p.proposer.toLowerCase().includes(proposerFilter.toLowerCase())
     );
 
+  const hasExecutedProposals = displayedProposals.some((p) => p.status === "executed");
+
+  const handleExportCSV = () => {
+    const executed = displayedProposals.filter((p) => p.status === "executed");
+    if (executed.length === 0) return;
+
+    const headers = ["ID", "Amount", "Token", "Recipient", "Date"];
+    const rows = executed.map(
+      (p) => `${p.id},"${p.amount}","${p.token}","${p.to}","${p.executedAt || p.deadline}"`
+    );
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "accord-history.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <>
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold">Proposal History</h2>
-        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded-lg">
+        <div className="flex items-center gap-3">
+          {hasExecutedProposals && (
+            <button
+              onClick={handleExportCSV}
+              className="text-xs px-3 py-1 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-white rounded-md transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              Export CSV
+            </button>
+          )}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value as CategoryFilter)}
+            aria-label="Filter by category"
+            className="text-xs px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-lg capitalize transition-colors hover:text-white focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+          >
+            {CATEGORY_OPTIONS.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded-lg">
           {TABS.map((tab) => (
             <button
               key={tab.key}
@@ -114,6 +173,7 @@ export function HistoryPage({
               {tab.label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
@@ -157,7 +217,7 @@ export function HistoryPage({
       <div className="space-y-3">
         {filteredProposals.length === 0 ? (
           <p className="text-zinc-600 text-sm py-8 text-center">
-            {searchTerm || proposerFilter
+            {searchTerm || proposerFilter || categoryFilter !== "all"
               ? "No proposals match your search"
               : `No ${activeTab === "all" ? "" : `${activeTab} `}proposals found`}
           </p>
