@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getSpendingLimit } from "../lib/contract";
+import { getSpendingLimit, getWeightCapPct, getRequiredQuorumWeight } from "../lib/contract";
 import { createSpendingLimitProposal } from "../lib/submit";
 import {
   displayToStroops,
@@ -47,7 +47,6 @@ type OwnersPageProps = {
   owners: Owner[];
   ownerAddresses: string[];
   threshold: number;
-  totalOwners: number;
   walletAddress: string | null;
   onProposalSubmitted: () => void;
 };
@@ -56,7 +55,6 @@ export function OwnersPage({
   owners,
   ownerAddresses,
   threshold,
-  totalOwners,
   walletAddress,
   onProposalSubmitted,
 }: OwnersPageProps) {
@@ -87,6 +85,25 @@ export function OwnersPage({
   const [slSubmitting, setSlSubmitting] = useState(false);
   const [slError, setSlError] = useState<string | null>(null);
 
+  const [weightCapPct, setWeightCapPct] = useState<number | null>(null);
+  const [quorumWeight, setQuorumWeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const [capPct, qWeight] = await Promise.all([
+        getWeightCapPct(),
+        getRequiredQuorumWeight(),
+      ]);
+      if (!cancelled) {
+        setWeightCapPct(capPct);
+        setQuorumWeight(qWeight);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
   // Load spending limits for all owners and tokens
   useEffect(() => {
     let cancelled = false;
@@ -114,11 +131,20 @@ export function OwnersPage({
     };
   }, [ownerAddresses]);
 
+  const hasOwnerWeights = totalWeight > 0;
+  const ownerWeightsLoading = weightsLoading;
+  const weightsUnavailable = !weightsLoading && totalWeight === 0;
+  const weightsStale = false;
+  const ownerCountLabel = `${ownerAddresses.length} ${ownerAddresses.length === 1 ? "owner" : "owners"}`;
+  const quorumPercent = totalWeight > 0 ? ((threshold / totalWeight) * 100).toFixed(1) : "0";
+
   const visibleOwners = owners
     .map((owner) => {
       const weight = weights[owner.address] ?? 1;
       const percentage = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
-      return { ...owner, weight, percentage };
+      const isAboveCap = weightCapPct !== null && percentage > weightCapPct;
+      const meetsQuorumAlone = quorumWeight !== null && weight >= quorumWeight;
+      return { ...owner, weight, percentage, isAboveCap, meetsQuorumAlone };
     })
     .sort((left, right) => {
       if (!sortByWeightDesc) return 0;
@@ -384,12 +410,35 @@ export function OwnersPage({
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-zinc-300">{owner.label}</p>
-                    {/* subtle badge retained for quick glance when not loading */}
-                    {!weightsLoading && (
-                      <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
-                        Weight: {weights[owner.address] ?? 1}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {!weightsLoading && (
+                        <span className="text-xs text-zinc-400 bg-zinc-850 border border-zinc-800 px-2 py-0.5 rounded-full font-mono">
+                          Weight: {weights[owner.address] ?? 1}
+                        </span>
+                      )}
+                      {owner.meetsQuorumAlone && (
+                        <span
+                          className="group relative text-xs text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded-full font-medium cursor-help"
+                          title="This owner's weight alone meets or exceeds the quorum requirement, meaning they can approve and execute any proposal unilaterally. Consider rebalancing weights or raising the quorum threshold."
+                        >
+                          ⚠ Single-owner quorum
+                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-zinc-200 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                            This owner's weight alone meets or exceeds the quorum requirement, meaning they can approve and execute any proposal unilaterally. Consider rebalancing weights or raising the quorum threshold.
+                          </span>
+                        </span>
+                      )}
+                      {!owner.meetsQuorumAlone && owner.isAboveCap && (
+                        <span
+                          className="group relative text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium cursor-help"
+                          title="This owner's voting weight exceeds the configured single-owner weight cap. A single compromised key would give them outsized control over the multisig."
+                        >
+                          ⚠ Above weight cap
+                          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-zinc-200 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                            This owner's voting weight exceeds the configured single-owner weight cap. A single compromised key would give them outsized control over the multisig.
+                          </span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="font-mono text-xs text-zinc-500">
                     {shortenAddr(owner.address)}
