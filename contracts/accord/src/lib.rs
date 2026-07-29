@@ -1483,15 +1483,31 @@ impl AccordContract {
                 );
             }
             ProposalKind::RemoveOwner(owner_to_remove) => {
-                let mut owners = read_owners_map(&env)?;
+                let owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
                 let weight = owners.get(owner_to_remove.clone()).unwrap_or(0);
+
+                // Re-check at execute time: removing this owner must not drop
+                // remaining total weight below the current threshold. The
+                // creation-time check in create_remove_owner_proposal only
+                // validates against the state at proposal creation — a
+                // concurrent governance proposal executed beforehand could
+                // have changed the owner set or threshold since then.
+                let current_threshold = read_threshold(&env)?;
+                let current_total = read_total_weight(&env);
+                let remaining_weight = current_total
+                    .checked_sub(weight)
+                    .ok_or(ContractError::ArithmeticError)?;
+                if remaining_weight < current_threshold {
+                    return Err(ContractError::WouldBreakThreshold);
+                }
+
+                let mut owners = owners;
                 owners.remove(owner_to_remove.clone());
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);
                 bump_persistent(&env, &key);
 
-                let current_total = read_total_weight(&env);
                 write_total_weight(
                     &env,
                     current_total
@@ -1508,6 +1524,17 @@ impl AccordContract {
                 );
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
+                // Re-check at execute time: the new threshold must still be
+                // valid against the current total weight. The creation-time
+                // check in create_change_threshold_proposal only validates
+                // against the state at proposal creation — a concurrent
+                // RemoveOwner proposal executed beforehand could have
+                // lowered the total weight since then.
+                let current_total = read_total_weight(&env);
+                if *new_threshold == 0 || *new_threshold > current_total {
+                    return Err(ContractError::InvalidThreshold);
+                }
+
                 let old_threshold = env
                     .storage()
                     .instance()

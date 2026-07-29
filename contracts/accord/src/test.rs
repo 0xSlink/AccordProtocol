@@ -5072,12 +5072,12 @@ fn test_quorum_matrix_remove_owner_and_remove_owner_blocked() {
     client.execute(&owners.get(0).unwrap(), &p1);
 
     // Execute second removal. Weight drops to 1, which is < threshold (2).
-    // GAP: Accord doesn't block this currently, so it executes and breaks invariant.
-    // We expect it to succeed in current impl, documenting the gap.
+    // The execute-time re-check now catches this and rejects it.
     let res = client.try_execute(&owners.get(0).unwrap(), &p2);
-    assert!(res.is_ok(), "GAP: RemoveOwner execution does not check WouldBreakThreshold");
+    assert_eq!(res, Err(Ok(ContractError::WouldBreakThreshold)));
     
-    assert!(client.get_total_weight() < client.get_threshold());
+    // Invariant preserved: total_weight (2) >= threshold (2).
+    assert!(client.get_total_weight() >= client.get_threshold());
 }
 
 // 2. RemoveOwner & ChangeOwnerWeight
@@ -5178,12 +5178,13 @@ fn test_quorum_matrix_remove_owner_and_change_threshold_blocked() {
     // Execute remove first: total weight = 2. owners.len() = 2.
     client.execute(&owners.get(0).unwrap(), &p_remove);
 
-    // GAP: ChangeThreshold execution DOES NOT check if `new_threshold <= owners.len()`.
-    // It only checks at creation! So this is another GAP.
+    // Change threshold to 3: total weight is now 2, so 3 > 2 is invalid.
+    // The execute-time re-check now catches this and rejects it.
     let res = client.try_execute(&owners.get(0).unwrap(), &p_thresh);
-    assert!(res.is_ok(), "GAP: ChangeThreshold execution does not check owners.len()");
+    assert_eq!(res, Err(Ok(ContractError::InvalidThreshold)));
     
-    assert!(client.get_threshold() > client.get_owners().len() as u32);
+    // Threshold stays at 2, which is <= total_weight (2).
+    assert!(client.get_threshold() <= client.get_total_weight());
 }
 
 // 4. ChangeOwnerWeight & ChangeOwnerWeight
