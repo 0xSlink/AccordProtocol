@@ -211,6 +211,29 @@ export async function getTotalWeight(): Promise<number> {
   }
 }
 
+export async function getProposalApprovalProgress(
+  proposalId: number,
+): Promise<{ approvalWeight: number; quorumWeight: number; totalWeight: number }> {
+  try {
+    const val = await simulateView("get_proposal_approval_progress", [
+      nativeToScVal(BigInt(proposalId), { type: "u64" }),
+    ]);
+    const raw = scValToNative(val) as {
+      approval_weight?: number;
+      quorum_weight?: number;
+      total_weight?: number;
+    };
+    return {
+      approvalWeight: Number(raw.approval_weight ?? 0),
+      quorumWeight: Number(raw.quorum_weight ?? 0),
+      totalWeight: Number(raw.total_weight ?? 0),
+    };
+  } catch (error) {
+    console.error(`Failed to get approval progress for proposal ${proposalId}:`, error);
+    throw error;
+  }
+}
+
 export async function getRequiredQuorumWeight(): Promise<number> {
   try {
     const val = await simulateView("get_required_quorum_weight");

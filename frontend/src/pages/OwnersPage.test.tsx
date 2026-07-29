@@ -18,8 +18,8 @@ const mockUseOwnerWeights = vi.mocked(useOwnerWeights);
 
 const ownerAddresses = ["GOWNER111", "GOWNER222"];
 const owners: Owner[] = [
-  { address: "GOWNER...R111", label: "Signer 1" },
-  { address: "GOWNER...R222", label: "Signer 2" },
+  { address: "GOWNER...R111", label: "Signer 1", weight: 5 },
+  { address: "GOWNER...R222", label: "Signer 2", weight: 15 },
 ];
 
 function renderOwnersPage() {
