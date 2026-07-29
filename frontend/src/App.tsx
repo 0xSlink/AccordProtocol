@@ -422,6 +422,7 @@ export default function App() {
               element={
                 <OwnersPage
                   owners={owners}
+                  ownerAddresses={ownerAddresses}
                   threshold={threshold}
                   totalOwners={owners.length}
                 />
