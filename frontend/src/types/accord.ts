@@ -14,6 +14,9 @@ export type Proposal = {
   description: string;
   approvals: number;
   threshold: number;
+  quorumWeight: number;
+  approvalWeight: number;
+  totalWeight: number;
   status: ProposalStatus;
   deadline: string;
   deadlineTs: number;
@@ -27,6 +30,7 @@ export type Proposal = {
 export type Owner = {
   address: string;
   label: string;
+  weight: number;
 };
 
 export type OwnerWeight = {

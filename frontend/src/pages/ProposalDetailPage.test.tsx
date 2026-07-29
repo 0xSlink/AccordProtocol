@@ -7,12 +7,17 @@ import { ProposalDetailPage } from "./ProposalDetailPage";
 
 const baseProposal = (overrides: Partial<Proposal> = {}): Proposal => ({
   id: 1,
+  kind: "transfer",
+  category: "transfer",
   to: "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4IQDNC",
   amount: "25",
   token: "XLM",
   description: "Treasury payment",
   approvals: 1,
   threshold: 2,
+  quorumWeight: 10,
+  approvalWeight: 5,
+  totalWeight: 20,
   status: "pending",
   deadline: "Jul 4, 2026",
   deadlineTs: 1783123200,
