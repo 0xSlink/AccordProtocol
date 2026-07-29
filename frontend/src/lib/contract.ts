@@ -189,6 +189,19 @@ export async function getOwnerWeight(owner: string): Promise<number> {
   }
 }
 
+export async function getOwnerWeights(): Promise<Array<{ address: string; weight: number }>> {
+  try {
+    const val = await simulateView("get_owner_weights");
+    const raw = scValToNative(val) as Array<{ owner?: string; address?: string; weight?: number }>;
+    return (raw ?? []).map((entry) => ({
+      address: String(entry.owner ?? entry.address ?? ""),
+      weight: Number(entry.weight ?? 0),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function getTotalWeight(): Promise<number> {
   try {
     const val = await simulateView("get_total_weight");
