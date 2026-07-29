@@ -22,6 +22,11 @@ export type Owner = {
   label: string;
 };
 
+export type OwnerWeight = {
+  address: string;
+  weight: number;
+};
+
 export type DashboardStat = {
   label: string;
   value: string;

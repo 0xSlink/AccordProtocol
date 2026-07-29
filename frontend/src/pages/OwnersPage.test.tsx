@@ -35,18 +35,17 @@ describe("OwnersPage", () => {
 
   test("shows weighted quorum and each owner voting share", () => {
     mockUseOwnerWeights.mockReturnValue({
-      weightsByAddress: {
-        GOWNER111: 5,
-        GOWNER222: 15,
-      },
-      totalWeight: 20,
+      ownerWeights: [
+        { address: "GOWNER111", weight: 5 },
+        { address: "GOWNER222", weight: 15 },
+      ],
       loading: false,
       error: null,
     });
 
     renderOwnersPage();
 
-    expect(mockUseOwnerWeights).toHaveBeenCalledWith(ownerAddresses);
+    expect(mockUseOwnerWeights).toHaveBeenCalledWith();
     expect(screen.getByText("Requires 5 of 20 voting weight")).toBeInTheDocument();
     expect(screen.getByText("25.0% of voting power must approve."))
       .toBeInTheDocument();
@@ -60,8 +59,7 @@ describe("OwnersPage", () => {
 
   test("keeps owners visible while voting weights load", () => {
     mockUseOwnerWeights.mockReturnValue({
-      weightsByAddress: {},
-      totalWeight: 0,
+      ownerWeights: [],
       loading: true,
       error: null,
     });
@@ -79,8 +77,7 @@ describe("OwnersPage", () => {
 
   test("keeps owners visible when voting weights fail to load", () => {
     mockUseOwnerWeights.mockReturnValue({
-      weightsByAddress: {},
-      totalWeight: 0,
+      ownerWeights: [],
       loading: false,
       error: "Failed to load owner weights",
     });

@@ -16,14 +16,26 @@ export function OwnersPage({
   totalOwners,
 }: OwnersPageProps) {
   const {
-    weightsByAddress,
-    totalWeight,
+    ownerWeights,
     loading: ownerWeightsLoading,
     error: ownerWeightsError,
-  } = useOwnerWeights(ownerAddresses);
+  } = useOwnerWeights();
 
+  const weightsByAddress = ownerWeights.reduce<Record<string, number>>(
+    (acc, { address, weight }) => {
+      acc[address] = weight;
+      return acc;
+    },
+    {},
+  );
+  const totalWeight = ownerWeights.reduce(
+    (total, { weight }) => total + weight,
+    0,
+  );
   const ownerCountLabel = `${totalOwners} ${totalOwners === 1 ? "owner" : "owners"}`;
-  const hasOwnerWeights = !ownerWeightsLoading && !ownerWeightsError;
+  const weightsUnavailable = Boolean(ownerWeightsError && ownerWeights.length === 0);
+  const hasOwnerWeights = !ownerWeightsLoading && !weightsUnavailable;
+  const weightsStale = Boolean(ownerWeightsError && ownerWeights.length > 0);
   const quorumPercent = hasOwnerWeights
     ? formatWeightPercent(threshold, totalWeight)
     : null;
@@ -41,11 +53,14 @@ export function OwnersPage({
           <p>
             {ownerWeightsLoading
               ? `Loading voting power across ${ownerCountLabel}...`
-              : ownerWeightsError
+              : weightsUnavailable
                 ? "Voting power unavailable; owners remain visible."
                 : `${quorumPercent} of voting power must approve.`}
           </p>
-          {ownerWeightsError && (
+          {weightsStale && (
+            <p className="text-amber-400">Voting weights may be stale.</p>
+          )}
+          {weightsUnavailable && (
             <p className="text-amber-400">Voting weights unavailable.</p>
           )}
         </div>
@@ -81,7 +96,7 @@ export function OwnersPage({
                 <div className="shrink-0 sm:text-right">
                   {ownerWeightsLoading ? (
                     <p className="text-xs text-zinc-500">Loading weight...</p>
-                  ) : ownerWeightsError ? (
+                  ) : weightsUnavailable ? (
                     <p className="text-xs text-zinc-500">Weight unavailable</p>
                   ) : (
                     <>

@@ -6,7 +6,7 @@ import {
   scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
-import type { Proposal, ProposalStatus } from "../types/accord";
+import type { OwnerWeight, Proposal, ProposalStatus } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
@@ -137,6 +137,11 @@ export function mapProposal(raw: any, threshold: number): Proposal {
 export async function getOwners(): Promise<string[]> {
   const val = await simulateView("get_owners");
   return scValToNative(val) as string[];
+}
+
+export async function getOwnerWeights(): Promise<OwnerWeight[]> {
+  const owners = await getOwners();
+  return owners.map((address) => ({ address, weight: 1 }));
 }
 
 export async function getThreshold(): Promise<number> {
