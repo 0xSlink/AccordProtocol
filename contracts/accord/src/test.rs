@@ -4158,6 +4158,119 @@ fn remove_owner_execute_emits_remove_owner_event() {
 }
 
 #[test]
+fn remove_owner_clears_approvals_from_pending_proposals() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // Owner A creates a transfer proposal.
+    let prop_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Transfer"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+
+    // Owner A and owner B approve → Ready (2 approvals = threshold 2).
+    client.approve(&owner_a, &prop_id);
+    client.approve(&owner_b, &prop_id);
+    assert_eq!(
+        client.get_proposal(&prop_id).status,
+        ProposalStatus::Ready
+    );
+
+    // Remove owner B via a separate RemoveOwner proposal.
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_c,
+        &owner_b,
+        &str(&env, "Remove owner_b"),
+        &DEADLINE,
+    );
+    client.approve(&owner_a, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_c, &remove_id);
+
+    // Owner B's approval should have been stripped from the pending proposal.
+    let prop = client.get_proposal(&prop_id);
+    assert_eq!(
+        prop.approvals, 1,
+        "expected only owner_a's weight to remain"
+    );
+    assert_eq!(
+        prop.status,
+        ProposalStatus::Pending,
+        "proposal should fall back to Pending after approver is removed"
+    );
+    assert!(
+        !client.has_approved(&prop_id, &owner_b),
+        "has_approved should be false for removed owner"
+    );
+    assert!(
+        client.has_approved(&prop_id, &owner_a),
+        "has_approved should still be true for remaining owner"
+    );
+}
+
+#[test]
+fn remove_owner_does_not_affect_terminal_proposals() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    // --- Executed proposal (contract already funded by setup) ---
+    let exec_id = client.create_proposal(
+        &owner_a,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Executed proposal"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &exec_id);
+    client.approve(&owner_b, &exec_id);
+    client.execute(&owner_c, &exec_id);
+    assert_eq!(
+        client.get_proposal(&exec_id).status,
+        ProposalStatus::Executed
+    );
+
+    // --- Expired proposal ---
+    set_timestamp(&env, NOW); // back to NOW
+    let expire_soon = NOW + 100;
+    let expire_id = client.create_proposal(
+        &owner_c,
+        &t(&env, &recipient, 1_000_000, &token_client.address),
+        &str(&env, "Will expire"),
+        &expire_soon,
+        &ProposalCategory::Transfer,
+    );
+    client.approve(&owner_a, &expire_id);
+    set_timestamp(&env, expire_soon + 1);
+    // Status derives to Expired but is not persisted until a function call touches it.
+
+    // --- Remove owner A (who approved both terminal proposals) ---
+    set_timestamp(&env, expire_soon + 1);
+    let remove_id = client.create_remove_owner_proposal(
+        &owner_b,
+        &owner_a,
+        &str(&env, "Remove owner_a"),
+        &DEADLINE,
+    );
+    client.approve(&owner_b, &remove_id);
+    client.approve(&owner_c, &remove_id);
+    client.execute(&owner_c, &remove_id);
+
+    // Executed proposal is unaffected — status stays Executed.
+    assert_eq!(
+        client.get_proposal(&exec_id).status,
+        ProposalStatus::Executed
+    );
+    // Expired proposal is unaffected — status stays Expired.
+    assert_eq!(
+        client.get_proposal(&expire_id).status,
+        ProposalStatus::Expired
+    );
+}
+
+#[test]
 fn change_threshold_execute_emits_change_threshold_event() {
     let (env, client, owner_a, owner_b, owner_c, _, _) = setup(3);
 
@@ -5068,13 +5181,15 @@ fn test_quorum_matrix_remove_owner_and_remove_owner_blocked() {
     client.approve(&owners.get(0).unwrap(), &p2);
     client.approve(&owners.get(1).unwrap(), &p2);
 
-    // Execute first removal. Weight drops from 3 to 2.
+    // Execute first removal. Weight drops from 3 to 2. During p1's
+    // execution, owner1's approval weight is also stripped from p2,
+    // dropping p2's approvals from 2 to 1 (< threshold 2).
     client.execute(&owners.get(0).unwrap(), &p1);
 
-    // Execute second removal. Weight drops to 1, which is < threshold (2).
-    // The execute-time re-check now catches this and rejects it.
+    // p2 is no longer Ready — it fails with ThresholdNotMet before
+    // reaching the RemoveOwner dispatch arm.
     let res = client.try_execute(&owners.get(0).unwrap(), &p2);
-    assert_eq!(res, Err(Ok(ContractError::WouldBreakThreshold)));
+    assert_eq!(res, Err(Ok(ContractError::ThresholdNotMet)));
     
     // Invariant preserved: total_weight (2) >= threshold (2).
     assert!(client.get_total_weight() >= client.get_threshold());

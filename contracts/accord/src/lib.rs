@@ -1515,6 +1515,34 @@ impl AccordContract {
                         .ok_or(ContractError::ArithmeticError)?,
                 );
 
+                // Remove the removed owner's approval weight from all
+                // Pending and Ready proposals they previously approved.
+                // Without this, a removed owner's prior votes would
+                // continue counting toward the threshold even after
+                // they are no longer an owner — undermining the M-of-N
+                // model. Terminal proposals (Executed, Expired, Revoked)
+                // are left untouched since their outcome is final.
+                let next_id: u64 = env.storage()
+                    .instance()
+                    .get(&next_id_key())
+                    .unwrap_or(1_u64);
+                for pid in 1_u64..next_id {
+                    if let Ok(mut p) = read_proposal(&env, pid) {
+                        let derived = derive_status(&env, &p);
+                        if matches!(derived, ProposalStatus::Pending | ProposalStatus::Ready)
+                            && read_approval(&env, pid, owner_to_remove)
+                        {
+                            write_approval(&env, pid, owner_to_remove, false);
+                            p.approvals = p
+                                .approvals
+                                .checked_sub(weight)
+                                .ok_or(ContractError::ArithmeticError)?;
+                            p.status = derive_status(&env, &p);
+                            write_proposal(&env, &p);
+                        }
+                    }
+                }
+
                 env.events().publish(
                     (symbol_short!("r_own"),),
                     RemoveOwnerExecutedEvent {
