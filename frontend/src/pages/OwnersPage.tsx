@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { getSpendingLimit } from "../lib/contract";
 import { createSpendingLimitProposal } from "../lib/submit";
-import { displayToStroops, stroopsToDisplay, shortenAddr } from "../lib/soroban";
+import {
+  displayToStroops,
+  stroopsToDisplay,
+  shortenAddr,
+} from "../lib/soroban";
 import { StrKey } from "@stellar/stellar-sdk";
 import type { Owner } from "../types/accord";
 import { useOwnerWeights } from "../hooks/useOwnerWeights";
@@ -56,10 +60,19 @@ export function OwnersPage({
   walletAddress,
   onProposalSubmitted,
 }: OwnersPageProps) {
-  const { weights, totalWeight, loading: weightsLoading } = useOwnerWeights(ownerAddresses);
+  const {
+    weights,
+    totalWeight,
+    loading: weightsLoading,
+  } = useOwnerWeights(ownerAddresses);
   const [spendingLimits, setSpendingLimits] = useState<SpendingLimitMap>({});
   const [limitsLoading, setLimitsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [sortByWeightDesc, setSortByWeightDesc] = useState(false);
+  const [filterMode, setFilterMode] = useState<"all" | "above" | "below">(
+    "all",
+  );
+  const [shareThreshold, setShareThreshold] = useState("0");
 
   // Spending limit proposal form state
   const [slOwner, setSlOwner] = useState("");
@@ -96,13 +109,41 @@ export function OwnersPage({
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [ownerAddresses]);
 
-  function formatLimit(limit: bigint, symbol: string): { text: string; variant: "unrestricted" | "zero" | "configured" } {
+  const visibleOwners = owners
+    .map((owner) => {
+      const weight = weights[owner.address] ?? 1;
+      const percentage = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
+      return { ...owner, weight, percentage };
+    })
+    .sort((left, right) => {
+      if (!sortByWeightDesc) return 0;
+      return right.weight - left.weight;
+    })
+    .filter((owner) => {
+      if (filterMode === "all") return true;
+
+      const threshold = Number(shareThreshold);
+      if (!Number.isFinite(threshold)) return true;
+
+      if (filterMode === "above") return owner.percentage > threshold;
+      return owner.percentage < threshold;
+    });
+
+  function formatLimit(
+    limit: bigint,
+    symbol: string,
+  ): { text: string; variant: "unrestricted" | "zero" | "configured" } {
     if (limit < 0n) return { text: "Unrestricted", variant: "unrestricted" };
     if (limit === 0n) return { text: `0 ${symbol}`, variant: "zero" };
-    return { text: `${stroopsToDisplay(limit)} ${symbol}`, variant: "configured" };
+    return {
+      text: `${stroopsToDisplay(limit)} ${symbol}`,
+      variant: "configured",
+    };
   }
 
   async function handleCreateSpendingLimit() {
@@ -151,7 +192,7 @@ export function OwnersPage({
         tokenAddr,
         displayToStroops(amountNum),
         slDescription.trim(),
-        BigInt(Math.floor(deadlineMs / 1000))
+        BigInt(Math.floor(deadlineMs / 1000)),
       );
       onProposalSubmitted();
       setShowForm(false);
@@ -175,7 +216,9 @@ export function OwnersPage({
 
       {/* Weight Distribution Chart */}
       <div className="mb-8 bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-        <h2 className="text-sm font-medium text-zinc-400 mb-3">Voting Weight Distribution</h2>
+        <h2 className="text-sm font-medium text-zinc-400 mb-3">
+          Voting Weight Distribution
+        </h2>
         {weightsLoading ? (
           <div className="h-6 bg-zinc-800 animate-pulse rounded-lg w-full" />
         ) : ownerAddresses.length === 0 ? (
@@ -184,11 +227,18 @@ export function OwnersPage({
           </div>
         ) : (
           <div>
-            <div role="region" aria-label={`Voting weight distribution across ${ownerAddresses.length} owners, total weight ${totalWeight}`} className="flex h-6 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 w-full mb-3">
+            <div
+              role="region"
+              aria-label={`Voting weight distribution across ${ownerAddresses.length} owners, total weight ${totalWeight}`}
+              className="flex h-6 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 w-full mb-3"
+            >
               {ownerAddresses.map((addr, idx) => {
                 const weight = weights[addr] ?? 1;
                 const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
-                const ownerInfo = owners.find((o) => o.address === addr) || { label: `Signer ${idx + 1}`, address: addr };
+                const ownerInfo = owners.find((o) => o.address === addr) || {
+                  label: `Signer ${idx + 1}`,
+                  address: addr,
+                };
                 const labelText = `${ownerInfo.label} (${addr.slice(0, 6)}...${addr.slice(-4)})`;
                 const titleStr = `${labelText}: weight ${weight} (${pct.toFixed(1)}%)`;
 
@@ -217,14 +267,30 @@ export function OwnersPage({
               {ownerAddresses.map((addr, idx) => {
                 const weight = weights[addr] ?? 1;
                 const pct = totalWeight > 0 ? (weight / totalWeight) * 100 : 0;
-                const ownerInfo = owners.find((o) => o.address === addr) || { label: `Signer ${idx + 1}`, address: addr };
-                const legendLabel = `${ownerInfo.label} ${addr.slice(0,6)}…${addr.slice(-4)}: ${weight} weight (${pct.toFixed(0)}%)`;
+                const ownerInfo = owners.find((o) => o.address === addr) || {
+                  label: `Signer ${idx + 1}`,
+                  address: addr,
+                };
+                const legendLabel = `${ownerInfo.label} ${addr.slice(0, 6)}…${addr.slice(-4)}: ${weight} weight (${pct.toFixed(0)}%)`;
                 return (
-                  <div key={addr} className="flex items-center gap-1.5 text-xs text-zinc-400" aria-label={legendLabel}>
-                    <span aria-hidden className={`w-2.5 h-2.5 rounded-full ${CHART_COLORS[idx % CHART_COLORS.length]}`} />
-                    <span className="font-medium text-zinc-300">{ownerInfo.label}</span>
-                    <span className="font-mono text-zinc-500">({addr.slice(0, 6)}…{addr.slice(-4)})</span>
-                    <span className="font-medium text-zinc-300">({weight} w, {pct.toFixed(0)}%)</span>
+                  <div
+                    key={addr}
+                    className="flex items-center gap-1.5 text-xs text-zinc-400"
+                    aria-label={legendLabel}
+                  >
+                    <span
+                      aria-hidden
+                      className={`w-2.5 h-2.5 rounded-full ${CHART_COLORS[idx % CHART_COLORS.length]}`}
+                    />
+                    <span className="font-medium text-zinc-300">
+                      {ownerInfo.label}
+                    </span>
+                    <span className="font-mono text-zinc-500">
+                      ({addr.slice(0, 6)}…{addr.slice(-4)})
+                    </span>
+                    <span className="font-medium text-zinc-300">
+                      ({weight} w, {pct.toFixed(0)}%)
+                    </span>
                   </div>
                 );
               })}
@@ -233,14 +299,66 @@ export function OwnersPage({
         )}
       </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-6">
+        <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={sortByWeightDesc}
+            onChange={(e) => setSortByWeightDesc(e.target.checked)}
+            className="accent-emerald-500"
+          />
+          Weight descending
+        </label>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="text-sm text-zinc-400 flex flex-col gap-1.5">
+            <span>Show owners</span>
+            <select
+              value={filterMode}
+              onChange={(e) =>
+                setFilterMode(e.target.value as "all" | "above" | "below")
+              }
+              aria-label="Show owners"
+              className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+            >
+              <option value="all">All</option>
+              <option value="above">Above</option>
+              <option value="below">Below</option>
+            </select>
+          </label>
+
+          <label className="text-sm text-zinc-400 flex flex-col gap-1.5">
+            <span>Share threshold (%)</span>
+            <input
+              id="share-threshold"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={shareThreshold}
+              onChange={(e) => setShareThreshold(e.target.value)}
+              aria-label="Share threshold"
+              disabled={filterMode === "all"}
+              className="w-28 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:ring-2 focus:ring-zinc-400 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+          </label>
+        </div>
+      </div>
+
       {/* Owners list with spending limits */}
       {owners.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-zinc-600 text-sm">No owners found.</p>
         </div>
+      ) : visibleOwners.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-zinc-600 text-sm">
+            No owners match the current filters.
+          </p>
+        </div>
       ) : (
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl divide-y divide-zinc-800 mb-8">
-          {owners.map((owner) => (
+          {visibleOwners.map((owner) => (
             <div key={owner.address}>
               <div className="flex items-center gap-3 px-4 py-4">
                 <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center text-xs text-zinc-400">
@@ -259,7 +377,9 @@ export function OwnersPage({
                   <p className="font-mono text-xs text-zinc-500">
                     {shortenAddr(owner.address)}
                     {!weightsLoading && (
-                      <span className="text-xs text-zinc-400 ml-2">· weight {weights[owner.address] ?? 1}</span>
+                      <span className="text-xs text-zinc-400 ml-2">
+                        · weight {weights[owner.address] ?? 1}
+                      </span>
                     )}
                   </p>
                 </div>
@@ -273,13 +393,11 @@ export function OwnersPage({
               ) : (
                 <div className="px-4 pb-4 pl-14 grid grid-cols-3 gap-2">
                   {TOKEN_SYMBOLS.map((symbol) => {
-                    const rawAddr = ownerAddresses[
-                      owners.findIndex((o) => o.address === owner.address)
-                    ];
-                    const limit = rawAddr ? spendingLimits[rawAddr]?.[symbol] : undefined;
-                    const info = limit !== undefined
-                      ? formatLimit(limit, symbol)
-                      : { text: "—", variant: "unrestricted" as const };
+                    const limit = spendingLimits[owner.address]?.[symbol];
+                    const info =
+                      limit !== undefined
+                        ? formatLimit(limit, symbol)
+                        : { text: "—", variant: "unrestricted" as const };
 
                     const variantStyles = {
                       unrestricted: "text-zinc-500",
@@ -290,7 +408,9 @@ export function OwnersPage({
                     return (
                       <div key={symbol} className="text-xs">
                         <span className="text-zinc-600">{symbol}: </span>
-                        <span className={`font-mono ${variantStyles[info.variant]}`}>
+                        <span
+                          className={`font-mono ${variantStyles[info.variant]}`}
+                        >
                           {info.text}
                         </span>
                       </div>
@@ -312,7 +432,11 @@ export function OwnersPage({
             onClick={() => setShowForm(!showForm)}
             aria-expanded={showForm}
             aria-controls="spending-limit-form"
-            aria-label={showForm ? "Close spending limit form" : "Open spending limit form"}
+            aria-label={
+              showForm
+                ? "Close spending limit form"
+                : "Open spending limit form"
+            }
             className="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
           >
             {showForm ? "Cancel" : "Set Spending Limit"}
@@ -320,13 +444,22 @@ export function OwnersPage({
         </div>
 
         {showForm && (
-          <div id="spending-limit-form" className="space-y-4 border-t border-zinc-800 pt-4">
+          <div
+            id="spending-limit-form"
+            className="space-y-4 border-t border-zinc-800 pt-4"
+          >
             <p className="text-xs text-zinc-400">
-              Propose a per-owner, per-token spending limit. Set to 0 to block spending for that token.
+              Propose a per-owner, per-token spending limit. Set to 0 to block
+              spending for that token.
             </p>
 
             <div>
-              <label htmlFor="sl-owner" className="text-xs text-zinc-400 block mb-1.5">Owner Address</label>
+              <label
+                htmlFor="sl-owner"
+                className="text-xs text-zinc-400 block mb-1.5"
+              >
+                Owner Address
+              </label>
               <input
                 id="sl-owner"
                 value={slOwner}
@@ -339,7 +472,10 @@ export function OwnersPage({
 
             <div className="flex gap-3">
               <div className="flex-1">
-                <label htmlFor="sl-amount" className="text-xs text-zinc-400 block mb-1.5">
+                <label
+                  htmlFor="sl-amount"
+                  className="text-xs text-zinc-400 block mb-1.5"
+                >
                   Limit Amount
                 </label>
                 <input
@@ -355,8 +491,14 @@ export function OwnersPage({
                 />
               </div>
               <div className="w-28">
-                <label className="text-xs text-zinc-400 block mb-1.5">Token</label>
-                <div className="grid grid-cols-3 gap-1" role="group" aria-label="Token selector">
+                <label className="text-xs text-zinc-400 block mb-1.5">
+                  Token
+                </label>
+                <div
+                  className="grid grid-cols-3 gap-1"
+                  role="group"
+                  aria-label="Token selector"
+                >
                   {TOKEN_SYMBOLS.map((symbol) => {
                     const active = slToken === symbol;
                     return (
@@ -381,7 +523,12 @@ export function OwnersPage({
             </div>
 
             <div>
-              <label htmlFor="sl-description" className="text-xs text-zinc-400 block mb-1.5">Description</label>
+              <label
+                htmlFor="sl-description"
+                className="text-xs text-zinc-400 block mb-1.5"
+              >
+                Description
+              </label>
               <input
                 id="sl-description"
                 value={slDescription}
@@ -394,7 +541,12 @@ export function OwnersPage({
             </div>
 
             <div>
-              <label htmlFor="sl-deadline" className="text-xs text-zinc-400 block mb-1.5">Deadline</label>
+              <label
+                htmlFor="sl-deadline"
+                className="text-xs text-zinc-400 block mb-1.5"
+              >
+                Deadline
+              </label>
               <input
                 id="sl-deadline"
                 type="date"
@@ -425,7 +577,8 @@ export function OwnersPage({
 
         {!showForm && (
           <p className="text-xs text-zinc-500">
-            Configure per-owner spending limits for specific tokens. All changes require multisig approval.
+            Configure per-owner spending limits for specific tokens. All changes
+            require multisig approval.
           </p>
         )}
       </div>
