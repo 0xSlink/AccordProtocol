@@ -1460,8 +1460,20 @@ impl AccordContract {
                 }
             }
             ProposalKind::AddOwner(new_owner) => {
-                let mut owners = read_owners_map(&env)?;
+                let owners = read_owners_map(&env)?;
                 let prev_count = owners.len();
+
+                // Re-check at execute time: adding an owner must not push the
+                // owner count past MAX_OWNERS (20). The creation-time check
+                // in create_add_owner_proposal only validates against the
+                // owner count at proposal creation — a concurrent AddOwner
+                // proposal executed beforehand could have already filled the
+                // last slot.
+                if prev_count >= MAX_OWNERS {
+                    return Err(ContractError::InvalidOwners);
+                }
+
+                let mut owners = owners;
                 owners.set(new_owner.clone(), MIN_OWNER_WEIGHT);
                 let key = owners_key();
                 env.storage().persistent().set(&key, &owners);

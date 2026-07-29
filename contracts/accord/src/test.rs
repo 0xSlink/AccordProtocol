@@ -2382,6 +2382,67 @@ fn create_add_owner_proposal_rejects_at_max_owners() {
     );
 }
 
+#[test]
+fn add_owner_execute_rejects_when_cap_reached_by_prior_add() {
+    let env = Env::default();
+    env.mock_all_auths();
+    set_timestamp(&env, NOW);
+
+    let contract_id = env.register(AccordContract, ());
+    let client = AccordContractClient::new(&env, &contract_id);
+
+    // Initialize with MAX_OWNERS - 1 (19) owners.
+    let mut owners = Vec::new(&env);
+    let first_owner = Address::generate(&env);
+    owners.push_back(first_owner.clone());
+    for _ in 1..MAX_OWNERS - 1 {
+        owners.push_back(Address::generate(&env));
+    }
+    let mut weights = Vec::new(&env);
+    for _ in 0..owners.len() {
+        weights.push_back(1);
+    }
+    client.initialize(&owners, &weights, &1, &0);
+    assert_eq!(client.get_owners().len(), MAX_OWNERS - 1);
+
+    // Create two AddOwner proposals for two different new addresses.
+    let new_owner_a = Address::generate(&env);
+    let new_owner_b = Address::generate(&env);
+
+    let p1 = client.create_add_owner_proposal(
+        &first_owner,
+        &new_owner_a,
+        &str(&env, "Add owner A"),
+        &DEADLINE,
+    );
+    let p2 = client.create_add_owner_proposal(
+        &first_owner,
+        &new_owner_b,
+        &str(&env, "Add owner B"),
+        &DEADLINE,
+    );
+
+    // Approve and execute p1: owner count goes from 19 to 20.
+    client.approve(&first_owner, &p1);
+    client.execute(&first_owner, &p1);
+    assert_eq!(client.get_proposal(&p1).status, ProposalStatus::Executed);
+    assert_eq!(client.get_owners().len(), MAX_OWNERS);
+
+    // Approve and try to execute p2: owner count is already at cap.
+    client.approve(&first_owner, &p2);
+    let res = client.try_execute(&first_owner, &p2);
+    assert_eq!(res, Err(Ok(ContractError::InvalidOwners)));
+
+    // p2 is not marked Executed and remains in Ready state.
+    assert_eq!(
+        client.get_proposal(&p2).status,
+        ProposalStatus::Ready,
+        "proposal rejected at execute time must not be marked Executed"
+    );
+    // Owner count stays at 20.
+    assert_eq!(client.get_owners().len(), MAX_OWNERS);
+}
+
 // ─── Spending Limits (issue #41) ───────────────────────────────────────────────
 
 #[test]
