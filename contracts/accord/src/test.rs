@@ -7401,6 +7401,7 @@ fn cancelling_recurring_payment_is_terminal_decrements_active_and_blocks_disburs
         &token_client.address,
         &1_000_000_i128,
         &3_600_u64,
+        &NOW,
         &(NOW + 86_400),
         &0_u64,
         &10_000_000_i128,
@@ -7448,4 +7449,61 @@ fn cancelling_recurring_payment_is_terminal_decrements_active_and_blocks_disburs
         ),
         Err(Ok(ContractError::ScheduleAlreadyCancelled))
     );
+}
+
+#[test]
+fn frozen_contract_blocks_recurring_disbursement_and_unfreezing_restores_it() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let guardian = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Recurring payment schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    set_timestamp(&env, NOW + 3_600);
+
+    assert_eq!(
+        client.try_disburse_recurring(&1_u64),
+        Err(Ok(ContractError::ContractFrozen))
+    );
+
+    let schedule_after_frozen_attempt = client.get_recurring_payment(&1);
+    assert_eq!(schedule_after_frozen_attempt.last_disbursed_at, 0);
+    assert_eq!(schedule_after_frozen_attempt.total_disbursed, 0);
+
+    client.unfreeze(&approvers);
+    assert!(!client.is_frozen());
+
+    client.disburse_recurring(&1_u64);
+
+    let schedule_after_unfreeze = client.get_recurring_payment(&1);
+    assert_eq!(schedule_after_unfreeze.last_disbursed_at, NOW + 3_600);
+    assert_eq!(schedule_after_unfreeze.total_disbursed, 1_000_000_i128);
 }
