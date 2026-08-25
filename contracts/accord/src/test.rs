@@ -7556,3 +7556,78 @@ fn linear_vesting_claimable_amount_matches_time_proportional_checkpoints() {
     assert_eq!(schedule_after_final_disburse.total_disbursed, total_cap);
     assert_eq!(schedule_after_final_disburse.status, RecurringStatus::Completed);
 }
+
+#[test]
+fn concurrent_create_recurring_proposals_enforce_active_cap_at_execute_time() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    for _ in 0..19 {
+        let id = client.create_recurring_proposal(
+            &owner_a,
+            &recipient,
+            &token_client.address,
+            &1_000_000_i128,
+            &3_600_u64,
+            &NOW,
+            &(NOW + 86_400),
+            &0_u64,
+            &10_000_000_i128,
+            &RecurringKind::FixedAmountPerPeriod,
+            &str(&env, "Pre-fill schedule"),
+            &DEADLINE,
+            &ProposalCategory::Ops,
+        );
+        client.approve(&owner_a, &id);
+        client.approve(&owner_b, &id);
+        client.execute(&owner_c, &id);
+    }
+
+    assert_eq!(client.get_active_recurring_count(), 19);
+
+    let prop1 = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Concurrent proposal 1"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    let prop2 = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Concurrent proposal 2"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &prop1);
+    client.approve(&owner_b, &prop1);
+
+    client.approve(&owner_a, &prop2);
+    client.approve(&owner_b, &prop2);
+
+    client.execute(&owner_c, &prop1);
+    assert_eq!(client.get_active_recurring_count(), 20);
+
+    assert_eq!(
+        client.try_execute(&owner_c, &prop2),
+        Err(Ok(ContractError::TooManyActiveRecurring))
+    );
+}
