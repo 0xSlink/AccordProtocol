@@ -205,26 +205,83 @@ export function ProposalDetailPage({
         {!loadingEvents && !eventsError && events.length > 0 && (
           <div className="mt-4 space-y-3">
             {events.map((event, index) => {
-              const badgeColors =
-                event.type === "approved"
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                  : event.type === "executed"
-                  ? "bg-sky-500/10 text-sky-400 border-sky-500/20"
-                  : "bg-amber-500/10 text-amber-400 border-amber-500/20";
+              const norm = String(event.type || "").toLowerCase().replace(/_/g, "");
+              let badgeColors = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+              let label = "Revoked";
 
-              const label =
-                event.type === "approved"
-                  ? "Approved"
-                  : event.type === "executed"
-                  ? "Executed"
-                  : "Revoked";
+              if (norm === "approved" || norm === "approve") {
+                badgeColors = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                label = "Approved";
+              } else if (norm === "executed" || norm === "execute") {
+                badgeColors = "bg-sky-500/10 text-sky-400 border-sky-500/20";
+                label = "Executed";
+              } else if (norm === "revoked" || norm === "revoke") {
+                badgeColors = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                label = "Revoked";
+              } else if (
+                norm === "ownerweightchanged" ||
+                norm === "cwgt" ||
+                norm === "ownerweightchange"
+              ) {
+                badgeColors = "bg-purple-500/10 text-purple-400 border-purple-500/20";
+                label = "Weight Changed";
+              } else if (
+                (norm.includes("recurring") && norm.includes("creat")) ||
+                norm === "reccreated" ||
+                norm === "schedulecreated"
+              ) {
+                badgeColors = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
+                label = "Recurring Payment Created";
+              } else if (
+                (norm.includes("recurring") && norm.includes("disburs")) ||
+                norm === "recdisbursed" ||
+                norm === "scheduledisbursed" ||
+                norm === "disbursed" ||
+                norm === "disburse"
+              ) {
+                badgeColors = "bg-teal-500/10 text-teal-400 border-teal-500/20";
+                label = "Recurring Payment Disbursed";
+              } else if (
+                (norm.includes("recurring") && norm.includes("pause")) ||
+                norm === "recpaused" ||
+                norm === "schedulepaused" ||
+                norm === "paused" ||
+                norm === "pause"
+              ) {
+                badgeColors = "bg-yellow-500/10 text-yellow-400 border-yellow-500/20";
+                label = "Recurring Payment Paused";
+              } else if (
+                (norm.includes("recurring") && norm.includes("cancel")) ||
+                norm.includes("cancel") ||
+                norm === "reccancelled" ||
+                norm === "schedulecancelled"
+              ) {
+                badgeColors = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                label = "Recurring Payment Cancelled";
+              }
+
+              const details =
+                event.details ||
+                (event.scheduleId !== undefined || event.amount
+                  ? [
+                      event.scheduleId !== undefined ? `Schedule #${event.scheduleId}` : null,
+                      event.amount
+                        ? event.token
+                          ? `${event.amount} ${event.token}`
+                          : event.amount
+                        : null,
+                      event.recipient ? `to ${event.recipient}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : null);
 
               return (
                 <div
-                  key={`${event.type}-${event.actor}-${index}`}
+                  key={`${event.type}-${event.actor}-${event.ledger ?? index}-${index}`}
                   className="flex flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span
                       className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium uppercase tracking-wider ${badgeColors}`}
                     >
@@ -233,6 +290,11 @@ export function ProposalDetailPage({
                     <span className="font-mono text-sm text-zinc-200">
                       {event.actor}
                     </span>
+                    {details && (
+                      <span className="text-sm text-zinc-400">
+                        {details}
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-zinc-500">{event.timestamp}</span>
                 </div>
