@@ -7507,3 +7507,52 @@ fn frozen_contract_blocks_recurring_disbursement_and_unfreezing_restores_it() {
     assert_eq!(schedule_after_unfreeze.last_disbursed_at, NOW + 3_600);
     assert_eq!(schedule_after_unfreeze.total_disbursed, 1_000_000_i128);
 }
+
+#[test]
+fn linear_vesting_claimable_amount_matches_time_proportional_checkpoints() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let start_time = NOW;
+    let cliff_time = NOW + 2_000;
+    let end_time = NOW + 10_000;
+    let total_cap = 10_000_000_i128;
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &0_i128,
+        &1_000_u64,
+        &start_time,
+        &end_time,
+        &cliff_time,
+        &total_cap,
+        &RecurringKind::LinearVesting,
+        &str(&env, "Linear vesting schedule"),
+        &DEADLINE,
+        &ProposalCategory::Grant,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    set_timestamp(&env, NOW + 1_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 0);
+
+    set_timestamp(&env, NOW + 5_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
+
+    client.disburse_recurring(&1_u64);
+    let schedule_after_first_disburse = client.get_recurring_payment(&1_u64);
+    assert_eq!(schedule_after_first_disburse.total_disbursed, 5_000_000_i128);
+
+    set_timestamp(&env, NOW + 12_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
+
+    client.disburse_recurring(&1_u64);
+    let schedule_after_final_disburse = client.get_recurring_payment(&1_u64);
+    assert_eq!(schedule_after_final_disburse.total_disbursed, total_cap);
+    assert_eq!(schedule_after_final_disburse.status, RecurringStatus::Completed);
+}
