@@ -58,7 +58,10 @@ const CONTRACT_ERRORS: Record<string, string> = {
   "22": "Invalid recipient address.",
   "23": "Time lock is still active. Please wait.",
   "24": "Removing this owner would break the required threshold.",
-  "25": "Owner not found."
+  "25": "Owner not found.",
+  "36": "You cannot delegate to yourself.",
+  "37": "Delegation expiry must be in the future.",
+  "38": "No active delegation found for this owner."
 };
 
 export function contractErrorMessage(error: string): string {

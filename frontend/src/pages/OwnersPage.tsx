@@ -8,6 +8,8 @@ import {
 import { StrKey } from "@stellar/stellar-sdk";
 import type { Owner } from "../types/accord";
 import { useOwnerWeights } from "../hooks/useOwnerWeights";
+import { useDelegations } from "../hooks/useDelegations";
+import { DelegateModal } from "../components/DelegateModal";
 
 const CHART_COLORS = [
   "bg-emerald-500",
@@ -54,7 +56,6 @@ export function OwnersPage({
   owners,
   ownerAddresses,
   threshold,
-  totalOwners: _totalOwners,
   walletAddress,
   onProposalSubmitted,
 }: OwnersPageProps) {
@@ -64,6 +65,12 @@ export function OwnersPage({
     loading: weightsLoading,
     error: weightsError,
   } = useOwnerWeights(ownerAddresses);
+  const {
+    delegations,
+    loading: delegationsLoading,
+    refetch: refetchDelegations,
+  } = useDelegations(ownerAddresses);
+  const [delegateModalOpen, setDelegateModalOpen] = useState(false);
   const [_spendingLimits, setSpendingLimits] = useState<SpendingLimitMap>({});
   const [_limitsLoading, setLimitsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -184,13 +191,6 @@ export function OwnersPage({
     };
   }, [ownerAddresses]);
 
-  const hasOwnerWeights = totalWeight > 0;
-  const ownerWeightsLoading = weightsLoading;
-  const weightsUnavailable = !weightsLoading && totalWeight === 0;
-  const weightsStale = false;
-  const ownerCountLabel = `${ownerAddresses.length} ${ownerAddresses.length === 1 ? "owner" : "owners"}`;
-  const quorumPercent = totalWeight > 0 ? ((threshold / totalWeight) * 100).toFixed(1) : "0";
-
   const visibleOwners = owners
     .map((owner, idx) => {
       const fullAddress = ownerAddresses[idx] ?? owner.address;
@@ -198,7 +198,12 @@ export function OwnersPage({
       const percentage = totalWeight > 0 && weight !== null
         ? (weight / totalWeight) * 100
         : 0;
-      return { ...owner, fullAddress, weight, percentage };
+      const outgoing = delegations.find((d) => d.delegator === fullAddress) ?? null;
+      const incoming = delegations.filter((d) => d.delegate === fullAddress);
+      const effectiveWeight = weight === null
+        ? null
+        : weight - (outgoing?.weight ?? 0) + incoming.reduce((sum, d) => sum + d.weight, 0);
+      return { ...owner, fullAddress, weight, percentage, outgoing, incoming, effectiveWeight };
     })
     .sort((left, right) => {
       if (!sortByWeightDesc) return 0;
@@ -525,21 +530,48 @@ export function OwnersPage({
                   {owner.label[0]}
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-sm text-zinc-300">{owner.label}</p>
-                    {ownerWeightsLoading ? (
-                      <span className="text-xs text-zinc-500">
-                        Loading weight...
-                      </span>
-                    ) : weightsUnavailable ? (
-                      <span className="text-xs text-red-400">
-                        Weight unavailable
-                      </span>
-                    ) : (
-                      <span className="text-xs text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-full font-mono">
-                        Weight {owner.weight}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {ownerWeightsLoading ? (
+                        <span className="text-xs text-zinc-500">
+                          Loading weight...
+                        </span>
+                      ) : weightsUnavailable ? (
+                        <span className="text-xs text-red-400">
+                          Weight unavailable
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-xs text-zinc-400 bg-zinc-800 border border-zinc-700 px-2 py-0.5 rounded-full font-mono">
+                            Raw {owner.weight}
+                          </span>
+                          {owner.effectiveWeight !== null &&
+                            owner.effectiveWeight !== owner.weight && (
+                              <span
+                                title="Effective weight = raw weight minus delegated-away weight plus delegated-in weight"
+                                className={`text-xs px-2 py-0.5 rounded-full font-mono border ${
+                                  owner.effectiveWeight > (owner.weight ?? 0)
+                                    ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/30"
+                                    : "text-amber-300 bg-amber-500/10 border-amber-500/30"
+                                }`}
+                              >
+                                Effective {owner.effectiveWeight}
+                              </span>
+                            )}
+                        </>
+                      )}
+                      {walletAddress === owner.fullAddress && !ownerWeightsLoading && !weightsUnavailable && (
+                        <button
+                          type="button"
+                          onClick={() => setDelegateModalOpen(true)}
+                          aria-label="Delegate voting weight"
+                          className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2 py-0.5 rounded-full transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+                        >
+                          Delegate
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="font-mono text-xs text-zinc-500">
                     {shortenAddr(owner.address)}
@@ -549,6 +581,24 @@ export function OwnersPage({
                       </span>
                     )}
                   </p>
+                  {!delegationsLoading && (owner.outgoing || owner.incoming.length > 0) && (
+                    <div className="mt-2 space-y-1">
+                      {owner.outgoing && (
+                        <p className="text-xs text-zinc-500">
+                          <span className="text-zinc-400">Delegated {owner.outgoing.weight} to</span>{" "}
+                          <span className="font-mono">{shortenAddr(owner.outgoing.delegate)}</span>
+                          <span className="ml-1">&middot; expires {owner.outgoing.expiry}</span>
+                        </p>
+                      )}
+                      {owner.incoming.map((d) => (
+                        <p key={d.delegator} className="text-xs text-zinc-500">
+                          <span className="text-zinc-400">Received {d.weight} from</span>{" "}
+                          <span className="font-mono">{shortenAddr(d.delegator)}</span>
+                          <span className="ml-1">&middot; expires {d.expiry}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -715,6 +765,24 @@ export function OwnersPage({
           </p>
         )}
       </div>
+
+      {delegateModalOpen && walletAddress && (
+        <DelegateModal
+          walletAddress={walletAddress}
+          ownerWeight={weights[walletAddress] ?? 1}
+          candidates={owners
+            .map((o, idx) => ({
+              address: ownerAddresses[idx] ?? o.address,
+              label: o.label,
+            }))
+            .filter((o) => o.address !== walletAddress)}
+          onClose={() => setDelegateModalOpen(false)}
+          onSubmitted={() => {
+            refetchDelegations();
+            onProposalSubmitted();
+          }}
+        />
+      )}
     </>
   );
 }

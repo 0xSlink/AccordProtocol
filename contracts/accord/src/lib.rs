@@ -102,6 +102,28 @@ pub struct SpendingLimitEntry {
     pub limit: i128,
 }
 
+/// An owner's delegation of (part of) their voting weight to another owner.
+/// An owner may hold at most one outgoing delegation at a time; creating a
+/// new one replaces the previous.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Delegation {
+    pub delegator: Address,
+    pub delegate: Address,
+    pub weight: u32,
+    /// Ledger timestamp (seconds) after which this delegation is no longer active.
+    pub expiry: u64,
+}
+
+/// A delegator's outgoing delegation alongside every delegation received
+/// from other owners, as returned by `get_delegations`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DelegationInfo {
+    pub outgoing: Option<Delegation>,
+    pub incoming: Vec<Delegation>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct ProposalCreatedEvent {
@@ -222,6 +244,23 @@ pub struct GovernanceMigratedEvent {
     pub total_weight: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DelegationCreatedEvent {
+    pub delegator: Address,
+    pub delegate: Address,
+    pub weight: u32,
+    pub expiry: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DelegationRevokedEvent {
+    pub delegator: Address,
+    pub delegate: Address,
+    pub weight: u32,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -265,6 +304,12 @@ pub enum ContractError {
     TargetOwnerNoLongerExists = 33,
     WouldBreakQuorum = 34,
     AlreadyMigrated = 35,
+    /// A delegator attempted to delegate to themselves.
+    SelfDelegation = 36,
+    /// The delegation's expiry is not in the future.
+    InvalidExpiry = 37,
+    /// No outgoing delegation exists for this owner.
+    DelegationNotFound = 38,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -337,6 +382,10 @@ fn governance_version_key() -> Symbol {
 
 fn max_single_owner_weight_pct_key() -> Symbol {
     symbol_short!("MAXOWNP")
+}
+
+fn delegation_key(delegator: &Address) -> (Symbol, Address) {
+    (symbol_short!("DELEG"), delegator.clone())
 }
 
 fn read_max_single_owner_weight_pct(env: &Env) -> u32 {
@@ -495,6 +544,62 @@ fn write_total_weight(env: &Env, weight: u32) {
     bump_instance(env);
 }
 
+fn read_delegation(env: &Env, delegator: &Address) -> Option<Delegation> {
+    let key = delegation_key(delegator);
+    let delegation: Option<Delegation> = env.storage().persistent().get(&key);
+    if delegation.is_some() {
+        bump_persistent(env, &key);
+    }
+    delegation
+}
+
+fn write_delegation(env: &Env, delegation: &Delegation) {
+    let key = delegation_key(&delegation.delegator);
+    env.storage().persistent().set(&key, delegation);
+    bump_persistent(env, &key);
+}
+
+fn remove_delegation(env: &Env, delegator: &Address) {
+    env.storage().persistent().remove(&delegation_key(delegator));
+}
+
+fn is_delegation_active(env: &Env, delegation: &Delegation) -> bool {
+    delegation.expiry > env.ledger().timestamp()
+}
+
+/// Computes `owner`'s effective weight given their already-known raw weight:
+/// raw weight, minus an active outgoing delegation, plus any active incoming
+/// delegations. Shared by the `get_effective_weight` view and by `approve`,
+/// so approvals are always counted using the same delegation-aware weight
+/// that callers can independently verify.
+fn compute_effective_weight(
+    env: &Env,
+    owners: &Map<Address, u32>,
+    owner: &Address,
+    raw_weight: u32,
+) -> Result<u32, ContractError> {
+    let mut effective = raw_weight;
+
+    if let Some(outgoing) = read_delegation(env, owner) {
+        if is_delegation_active(env, &outgoing) {
+            effective = checked_weight_sub(effective, outgoing.weight)?;
+        }
+    }
+
+    for other in owners.keys().iter() {
+        if other == *owner {
+            continue;
+        }
+        if let Some(delegation) = read_delegation(env, &other) {
+            if delegation.delegate == *owner && is_delegation_active(env, &delegation) {
+                effective = checked_weight_add(effective, delegation.weight)?;
+            }
+        }
+    }
+
+    Ok(effective)
+}
+
 
 
 
@@ -532,19 +637,28 @@ fn write_proposal(env: &Env, proposal: &Proposal) {
     bump_persistent(env, &key);
 }
 
-fn read_approval(env: &Env, proposal_id: u64, owner: &Address) -> bool {
+/// Returns the effective weight that was counted for this owner's approval of
+/// `proposal_id`, or 0 if they have not approved (or have since revoked). The
+/// exact weight is stored — rather than recomputed from current delegation
+/// state — so `revoke` and owner-removal cleanup always reverse precisely
+/// what `approve` added, even if delegations have changed in between.
+fn read_approval_weight(env: &Env, proposal_id: u64, owner: &Address) -> u32 {
     let key = approval_key(proposal_id, owner);
-    let approved = env.storage().persistent().get(&key).unwrap_or(false);
-    if env.storage().persistent().has(&key) {
+    let weight: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+    if weight > 0 {
         bump_persistent(env, &key);
     }
-    approved
+    weight
 }
 
-fn write_approval(env: &Env, proposal_id: u64, owner: &Address, approved: bool) {
+fn write_approval_weight(env: &Env, proposal_id: u64, owner: &Address, weight: u32) {
     let key = approval_key(proposal_id, owner);
-    env.storage().persistent().set(&key, &approved);
-    bump_persistent(env, &key);
+    if weight == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &weight);
+        bump_persistent(env, &key);
+    }
 }
 
 /// Reads the per-owner spending limit for a token. Returns `None` when no limit
@@ -786,6 +900,9 @@ fn require_weighted_approvers(env: &Env, approvers: &Vec<Address>) -> Result<(),
     Ok(())
 }
 
+// `proposal.approvals` is a running sum of each approver's effective
+// (delegation-aware) weight at the moment they approved — see `approve` —
+// so this comparison is already a quorum check against effective weight.
 fn derive_status(env: &Env, proposal: &Proposal) -> ProposalStatus {
     // Terminal statuses are never overridden.
     if matches!(
@@ -1590,7 +1707,8 @@ impl AccordContract {
     /// Records `ready_at` the first time the threshold is crossed.
     pub fn approve(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        let weight = require_owner_and_weight(&env, &approver)?;
+        let owners = read_owners_map(&env)?;
+        let raw_weight = owners.get(approver.clone()).ok_or(ContractError::Unauthorized)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         // Refresh derived status so an already-expired proposal is caught here.
@@ -1603,13 +1721,16 @@ impl AccordContract {
             return Err(ContractError::ProposalNotActive);
         }
 
-        if read_approval(&env, proposal_id, &approver) {
+        if read_approval_weight(&env, proposal_id, &approver) > 0 {
             return Err(ContractError::AlreadyApproved);
         }
 
-        write_approval(&env, proposal_id, &approver, true);
+        // Count the approver's effective (delegation-aware) weight, not just
+        // their own raw weight — the exact value is stored per-approval so
+        // `revoke` can later reverse precisely this amount.
+        let weight = compute_effective_weight(&env, &owners, &approver, raw_weight)?;
+        write_approval_weight(&env, proposal_id, &approver, weight);
 
-        
         proposal.approvals = checked_weight_add(proposal.approvals, weight)?;
 
         proposal.approval_weight = checked_weight_add(proposal.approval_weight, weight)?;
@@ -1643,7 +1764,7 @@ impl AccordContract {
     /// threshold the status transitions back to `Pending`.
     pub fn revoke(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
-        let weight = require_owner_and_weight(&env, &approver)?;
+        require_owner_and_weight(&env, &approver)?;
         let mut proposal = read_proposal(&env, proposal_id)?;
 
         proposal.status = derive_status(&env, &proposal);
@@ -1655,13 +1776,16 @@ impl AccordContract {
             return Err(ContractError::ProposalNotActive);
         }
 
-        if !read_approval(&env, proposal_id, &approver) {
+        // Reverse exactly the effective weight that was counted at approval
+        // time, not the approver's current effective weight — delegations may
+        // have changed since they approved.
+        let weight = read_approval_weight(&env, proposal_id, &approver);
+        if weight == 0 {
             return Err(ContractError::NotApproved);
         }
 
-        write_approval(&env, proposal_id, &approver, false);
+        write_approval_weight(&env, proposal_id, &approver, 0);
 
-        
         proposal.approvals = checked_weight_sub(proposal.approvals, weight)?;
 
         proposal.approval_weight = checked_weight_sub(proposal.approval_weight, weight)?;
@@ -1681,6 +1805,105 @@ impl AccordContract {
         );
 
         Ok(())
+    }
+
+    // ─── Delegation ───────────────────────────────────────────────────────────
+
+    /// Delegates up to `weight` of the caller's own voting weight to another
+    /// owner until `expiry` (a ledger timestamp in seconds). Replaces any
+    /// existing outgoing delegation from `delegator`. Both addresses must be
+    /// current owners, and the caller must authorize the call itself.
+    pub fn create_delegation(
+        env: Env,
+        delegator: Address,
+        delegate: Address,
+        weight: u32,
+        expiry: u64,
+    ) -> Result<(), ContractError> {
+        require_not_frozen(&env)?;
+        delegator.require_auth();
+
+        if delegator == delegate {
+            return Err(ContractError::SelfDelegation);
+        }
+
+        let owners = read_owners_map(&env)?;
+        let delegator_weight = owners
+            .get(delegator.clone())
+            .ok_or(ContractError::Unauthorized)?;
+        if !owners.contains_key(delegate.clone()) {
+            return Err(ContractError::OwnerNotFound);
+        }
+
+        if weight == 0 || weight > delegator_weight {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        if expiry <= env.ledger().timestamp() {
+            return Err(ContractError::InvalidExpiry);
+        }
+
+        let delegation = Delegation {
+            delegator: delegator.clone(),
+            delegate: delegate.clone(),
+            weight,
+            expiry,
+        };
+        write_delegation(&env, &delegation);
+
+        env.events().publish(
+            (symbol_short!("del_new"),),
+            DelegationCreatedEvent {
+                delegator,
+                delegate,
+                weight,
+                expiry,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Revokes the caller's outgoing delegation, if any.
+    pub fn revoke_delegation(env: Env, delegator: Address) -> Result<(), ContractError> {
+        delegator.require_auth();
+
+        let delegation =
+            read_delegation(&env, &delegator).ok_or(ContractError::DelegationNotFound)?;
+        remove_delegation(&env, &delegator);
+
+        env.events().publish(
+            (symbol_short!("del_rvk"),),
+            DelegationRevokedEvent {
+                delegator,
+                delegate: delegation.delegate,
+                weight: delegation.weight,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Removes any current owner's outgoing delegation whose expiry has passed.
+    /// Callable by any owner as routine maintenance; returns the number of
+    /// delegations removed. Safe to call even when nothing has expired.
+    pub fn sweep_expired_delegations(env: Env, caller: Address) -> Result<u32, ContractError> {
+        caller.require_auth();
+        require_owner_and_weight(&env, &caller)?;
+
+        let owners = read_owners_map(&env)?;
+        let mut swept: u32 = 0;
+
+        for owner in owners.keys().iter() {
+            if let Some(delegation) = read_delegation(&env, &owner) {
+                if !is_delegation_active(&env, &delegation) {
+                    remove_delegation(&env, &owner);
+                    swept = swept.saturating_add(1);
+                }
+            }
+        }
+
+        Ok(swept)
     }
 
     /// Executes a `Ready` proposal. For transfer proposals, tokens are sent to the recipient.
@@ -1877,14 +2100,19 @@ impl AccordContract {
                 for pid in 1_u64..next_id {
                     if let Ok(mut p) = read_proposal(&env, pid) {
                         let derived = derive_status(&env, &p);
-                        if matches!(derived, ProposalStatus::Pending | ProposalStatus::Ready)
-                            && read_approval(&env, pid, owner_to_remove)
-                        {
-                            write_approval(&env, pid, owner_to_remove, false);
-                            p.approvals = checked_weight_sub(p.approvals, weight)?;
-                            p.approval_weight = checked_weight_sub(p.approval_weight, weight)?;
-                            p.status = derive_status(&env, &p);
-                            write_proposal(&env, &p);
+                        if matches!(derived, ProposalStatus::Pending | ProposalStatus::Ready) {
+                            // Reverse the exact effective weight stored for this
+                            // approval — not the owner's raw weight, which may
+                            // differ from what was actually counted.
+                            let counted_weight = read_approval_weight(&env, pid, owner_to_remove);
+                            if counted_weight > 0 {
+                                write_approval_weight(&env, pid, owner_to_remove, 0);
+                                p.approvals = checked_weight_sub(p.approvals, counted_weight)?;
+                                p.approval_weight =
+                                    checked_weight_sub(p.approval_weight, counted_weight)?;
+                                p.status = derive_status(&env, &p);
+                                write_proposal(&env, &p);
+                            }
                         }
                     }
                 }
@@ -2062,7 +2290,7 @@ impl AccordContract {
 
         let mut approvers = Vec::new(&env);
         for owner in owners.keys().iter() {
-            if read_approval(&env, proposal_id, &owner) {
+            if read_approval_weight(&env, proposal_id, &owner) > 0 {
                 approvers.push_back(owner);
             }
         }
@@ -2110,6 +2338,51 @@ impl AccordContract {
     /// may receive through a ChangeOwnerWeight proposal.
     pub fn get_max_single_owner_weight_pct(env: Env) -> u32 {
         read_max_single_owner_weight_pct(&env)
+    }
+
+    /// Returns `owner`'s outgoing delegation (if any, including expired ones)
+    /// alongside every delegation currently received from other owners.
+    pub fn get_delegations(env: Env, owner: Address) -> Result<DelegationInfo, ContractError> {
+        let owners = read_owners_map(&env)?;
+        let outgoing = read_delegation(&env, &owner);
+
+        let mut incoming = Vec::new(&env);
+        for other in owners.keys().iter() {
+            if other == owner {
+                continue;
+            }
+            if let Some(delegation) = read_delegation(&env, &other) {
+                if delegation.delegate == owner {
+                    incoming.push_back(delegation);
+                }
+            }
+        }
+
+        Ok(DelegationInfo { outgoing, incoming })
+    }
+
+    /// Returns every current owner's outgoing delegation that has not yet expired.
+    pub fn get_active_delegations(env: Env) -> Result<Vec<Delegation>, ContractError> {
+        let owners = read_owners_map(&env)?;
+        let mut result = Vec::new(&env);
+        for owner in owners.keys().iter() {
+            if let Some(delegation) = read_delegation(&env, &owner) {
+                if is_delegation_active(&env, &delegation) {
+                    result.push_back(delegation);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Returns `owner`'s effective voting weight: their raw weight, minus any
+    /// outgoing delegation still active, plus any incoming delegations still
+    /// active. Expired delegations (`expiry <= current ledger time`) are
+    /// excluded from this calculation on both sides.
+    pub fn get_effective_weight(env: Env, owner: Address) -> Result<u32, ContractError> {
+        let owners = read_owners_map(&env)?;
+        let raw_weight = owners.get(owner.clone()).ok_or(ContractError::OwnerNotFound)?;
+        compute_effective_weight(&env, &owners, &owner, raw_weight)
     }
 
     /// Updates the maximum single-owner weight percentage (1..=50). The same
@@ -2227,7 +2500,7 @@ impl AccordContract {
 
     /// Returns whether `owner` has approved `proposal_id`.
     pub fn has_approved(env: Env, proposal_id: u64, owner: Address) -> bool {
-        read_approval(&env, proposal_id, &owner)
+        read_approval_weight(&env, proposal_id, &owner) > 0
     }
 
     /// Returns the current approval progress for a proposal: the cumulative

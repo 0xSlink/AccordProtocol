@@ -85,5 +85,17 @@ export type RecurringSchedule = {
   description?: string;
 };
 
+export type Delegation = {
+  delegator: string;
+  delegate: string;
+  weight: number;
+  expiry: string;
+  expiryTs: number;
+  active: boolean;
+};
 
+export type OwnerDelegations = {
+  outgoing: Delegation | null;
+  incoming: Delegation[];
+};
 
