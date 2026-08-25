@@ -7,6 +7,8 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import type {
+  Delegation,
+  OwnerDelegations,
   Proposal,
   ProposalCategory,
   ProposalEvent,
@@ -171,6 +173,47 @@ export function mapProposal(raw: any, threshold: number): Proposal {
     approverAddresses: [],
     executedAt: formatDeadline(rawDeadline),
   };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapDelegation(raw: any): Delegation {
+  const expiryTs = Number(safeBigInt(raw.expiry));
+  return {
+    delegator: String(raw.delegator),
+    delegate: String(raw.delegate),
+    weight: Number(raw.weight ?? 0),
+    expiry: formatDeadline(safeBigInt(raw.expiry)),
+    expiryTs,
+    active: expiryTs * 1000 > Date.now(),
+  };
+}
+
+// Returns `owner`'s outgoing delegation (if any) alongside every delegation
+// they currently receive from other owners.
+export async function getDelegations(owner: string): Promise<OwnerDelegations> {
+  try {
+    const val = await simulateView("get_delegations", [
+      nativeToScVal(owner, { type: "address" }),
+    ]);
+    const raw = scValToNative(val) as { outgoing?: unknown; incoming?: unknown[] };
+    return {
+      outgoing: raw?.outgoing ? mapDelegation(raw.outgoing) : null,
+      incoming: Array.isArray(raw?.incoming) ? raw.incoming.map(mapDelegation) : [],
+    };
+  } catch {
+    return { outgoing: null, incoming: [] };
+  }
+}
+
+// Returns every owner's outgoing delegation that has not yet expired.
+export async function getActiveDelegations(): Promise<Delegation[]> {
+  try {
+    const val = await simulateView("get_active_delegations");
+    const raw = scValToNative(val);
+    return Array.isArray(raw) ? raw.map(mapDelegation) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function getOwners(): Promise<string[]> {
