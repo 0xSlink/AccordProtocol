@@ -7387,3 +7387,65 @@ fn benchmark_approve_cost_20_owners() {
         mem_approve
     );
 }
+
+// ─── Recurring Payment Tests ──────────────────────────────────────────────────
+
+#[test]
+fn cancelling_recurring_payment_is_terminal_decrements_active_and_blocks_disbursement() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Recurring payment schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+    let schedule = client.get_recurring_payment(&1);
+    assert_eq!(schedule.status, RecurringStatus::Active);
+
+    let cancel_id = client.create_cancel_recurring_proposal(
+        &owner_a,
+        &1_u64,
+        &str(&env, "Cancel recurring schedule"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &cancel_id);
+    client.approve(&owner_b, &cancel_id);
+    client.execute(&owner_c, &cancel_id);
+
+    assert_eq!(client.get_active_recurring_count(), 0);
+
+    let cancelled_schedule = client.get_recurring_payment(&1);
+    assert_eq!(cancelled_schedule.status, RecurringStatus::Cancelled);
+
+    assert_eq!(
+        client.try_disburse_recurring(&1_u64),
+        Err(Ok(ContractError::ScheduleNotActive))
+    );
+
+    assert_eq!(
+        client.try_create_cancel_recurring_proposal(
+            &owner_a,
+            &1_u64,
+            &str(&env, "Second cancel attempt"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::ScheduleAlreadyCancelled))
+    );
+}
