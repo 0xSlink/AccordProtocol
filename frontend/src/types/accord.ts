@@ -67,4 +67,23 @@ export type ProposalEvent = {
   details?: string;
 };
 
+export type RecurringScheduleStatus = "active" | "paused" | "completed" | "cancelled";
+
+export type RecurringSchedule = {
+  id: number;
+  recipient: string;
+  amount: string;
+  token?: string;
+  cadence?: string;
+  interval?: number;
+  totalDisbursed: string;
+  status: RecurringScheduleStatus;
+  cliff?: number | string;
+  endDate?: number | string;
+  cap?: string;
+  nextDisbursementTs?: number;
+  description?: string;
+};
+
+
 
