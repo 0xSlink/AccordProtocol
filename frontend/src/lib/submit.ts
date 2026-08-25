@@ -147,6 +147,21 @@ export async function createProposal(
   ]);
 }
 
+export async function createDelegation(
+  callerAddress: string,
+  delegate: string,
+  weight: number,
+  expiryTs: bigint
+): Promise<void> {
+  // Contract signature: create_delegation(delegator, delegate, weight, expiry)
+  await buildAndSubmit(callerAddress, "create_delegation", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(delegate, { type: "address" }),
+    nativeToScVal(weight, { type: "u32" }),
+    nativeToScVal(expiryTs, { type: "u64" }),
+  ]);
+}
+
 export async function createSpendingLimitProposal(
   callerAddress: string,
   owner: string,
