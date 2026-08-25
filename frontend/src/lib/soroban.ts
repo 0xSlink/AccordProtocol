@@ -77,3 +77,26 @@ export function contractErrorMessage(error: string): string {
 
   return fallback;
 }
+
+export function formatInterval(seconds: number | bigint | string): string {
+  const s = Number(seconds);
+  if (isNaN(s) || s <= 0) return "—";
+  if (s === 86400) return "Daily";
+  if (s === 604800) return "Weekly";
+  if (s === 2592000 || s === 2629743 || s === 2629800 || s === 2592000) return "Monthly";
+  if (s === 31536000) return "Yearly";
+  if (s % 86400 === 0) {
+    const days = s / 86400;
+    return days === 1 ? "1 day" : `Every ${days} days`;
+  }
+  if (s % 3600 === 0) {
+    const hours = s / 3600;
+    return hours === 1 ? "1 hour" : `Every ${hours} hours`;
+  }
+  if (s % 60 === 0) {
+    const mins = s / 60;
+    return mins === 1 ? "1 min" : `Every ${mins} mins`;
+  }
+  return `Every ${s}s`;
+}
+

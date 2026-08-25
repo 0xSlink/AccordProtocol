@@ -14,9 +14,9 @@ export type Proposal = {
   description: string;
   approvals: number;
   threshold: number;
-  quorumWeight: number;
-  approvalWeight: number;
-  totalWeight: number;
+  quorumWeight?: number;
+  approvalWeight?: number;
+  totalWeight?: number;
   status: ProposalStatus;
   deadline: string;
   deadlineTs: number;
@@ -30,7 +30,7 @@ export type Proposal = {
 export type Owner = {
   address: string;
   label: string;
-  weight: number;
+  weight?: number;
 };
 
 export type OwnerWeight = {
@@ -44,13 +44,45 @@ export type DashboardStat = {
   sub: string;
 };
 
-export type ProposalEventType = "approved" | "revoked" | "executed";
+export type ProposalEventType =
+  | "approved"
+  | "revoked"
+  | "executed"
+  | "owner_weight_changed"
+  | "recurring_payment_created"
+  | "recurring_payment_disbursed"
+  | "recurring_payment_paused"
+  | "recurring_payment_cancelled"
+  | (string & {});
 
 export type ProposalEvent = {
   type: ProposalEventType;
   actor: string;
   timestamp: string;
   ledger?: number;
+  scheduleId?: number | string;
+  amount?: string;
+  token?: string;
+  recipient?: string;
+  details?: string;
+};
+
+export type RecurringScheduleStatus = "active" | "paused" | "completed" | "cancelled";
+
+export type RecurringSchedule = {
+  id: number;
+  recipient: string;
+  amount: string;
+  token?: string;
+  cadence?: string;
+  interval?: number;
+  totalDisbursed: string;
+  status: RecurringScheduleStatus;
+  cliff?: number | string;
+  endDate?: number | string;
+  cap?: string;
+  nextDisbursementTs?: number;
+  description?: string;
 };
 
 export type Delegation = {

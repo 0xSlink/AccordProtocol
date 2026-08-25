@@ -164,6 +164,9 @@ export function mapProposal(raw: any, threshold: number): Proposal {
     description: String(raw.description),
     approvals: Number(raw.approvals),
     threshold,
+    quorumWeight: Number(raw.quorum_weight ?? threshold),
+    approvalWeight: Number(raw.approval_weight ?? raw.approvals ?? 0),
+    totalWeight: 0,
     status: mapStatus(raw.status),
     deadline: formatDeadline(rawDeadline),
     deadlineTs: Number(rawDeadline),
@@ -499,6 +502,89 @@ function formatEventTimestamp(ledgerClosedAt?: string, ledger?: number): string 
   return "Just now";
 }
 
+function resolveEventType(first: string, second: string): ProposalEventType | null {
+  const normFirst = first.replace(/_/g, "");
+  const normSecond = second.replace(/_/g, "");
+
+  if (normFirst === "approved" || normFirst === "proposalapproved" || normFirst === "approve") {
+    return "approved";
+  }
+  if (normFirst === "revoked" || normFirst === "proposalrevoked" || normFirst === "revoke") {
+    return "revoked";
+  }
+  if (normFirst === "executed" || normFirst === "proposalexecuted" || normFirst === "execute") {
+    return "executed";
+  }
+  if (
+    normFirst === "ownerweightchanged" ||
+    normFirst === "cwgt" ||
+    normFirst === "ownerweightchange"
+  ) {
+    return "owner_weight_changed";
+  }
+  if (
+    normFirst === "recurringpaymentcreated" ||
+    normFirst === "recurringcreated" ||
+    normFirst === "reccreate" ||
+    normFirst === "reccreated" ||
+    normFirst === "recpmtcreated" ||
+    normFirst === "schedulecreated" ||
+    ((normFirst.includes("recurring") || normFirst.includes("schedule")) &&
+      (normFirst.includes("create") || normSecond.includes("create")))
+  ) {
+    return "recurring_payment_created";
+  }
+  if (
+    normFirst === "recurringpaymentdisbursed" ||
+    normFirst === "recurringdisbursed" ||
+    normFirst === "recdisburse" ||
+    normFirst === "recdisbursed" ||
+    normFirst === "recpmtdisbursed" ||
+    normFirst === "scheduledisbursed" ||
+    normFirst === "disbursed" ||
+    normFirst === "disburse" ||
+    ((normFirst.includes("recurring") || normFirst.includes("schedule")) &&
+      (normFirst.includes("disburs") || normSecond.includes("disburs")))
+  ) {
+    return "recurring_payment_disbursed";
+  }
+  if (
+    normFirst === "recurringpaymentpaused" ||
+    normFirst === "recurringpaused" ||
+    normFirst === "recpause" ||
+    normFirst === "recpaused" ||
+    normFirst === "recpmtpaused" ||
+    normFirst === "schedulepaused" ||
+    normFirst === "paused" ||
+    normFirst === "pause" ||
+    ((normFirst.includes("recurring") || normFirst.includes("schedule")) &&
+      (normFirst.includes("pause") || normSecond.includes("pause")))
+  ) {
+    return "recurring_payment_paused";
+  }
+  if (
+    normFirst === "recurringpaymentcancelled" ||
+    normFirst === "recurringpaymentcanceled" ||
+    normFirst === "recurringcancelled" ||
+    normFirst === "recurringcanceled" ||
+    normFirst === "reccancel" ||
+    normFirst === "reccancelled" ||
+    normFirst === "reccanceled" ||
+    normFirst === "recpmtcancelled" ||
+    normFirst === "recpmtcanceled" ||
+    normFirst === "schedulecancelled" ||
+    normFirst === "schedulecanceled" ||
+    normFirst === "cancelled" ||
+    normFirst === "canceled" ||
+    normFirst === "cancel" ||
+    ((normFirst.includes("recurring") || normFirst.includes("schedule")) &&
+      (normFirst.includes("cancel") || normSecond.includes("cancel")))
+  ) {
+    return "recurring_payment_cancelled";
+  }
+  return null;
+}
+
 export async function getProposalEvents(proposalId: number): Promise<ProposalEvent[]> {
   try {
     let startLedger = 1;
@@ -527,26 +613,147 @@ export async function getProposalEvents(proposalId: number): Promise<ProposalEve
         try {
           const rawTopic = Array.isArray(rawEv.topic) ? rawEv.topic : [rawEv.topic];
           const topics = rawTopic.map(parseScVal);
-          const topicName = String(topics[0] ?? "").toLowerCase();
+          const firstTopic = String(topics[0] ?? "").toLowerCase();
+          const secondTopic = topics.length > 1 ? String(topics[1] ?? "").toLowerCase() : "";
 
-          if (topicName === "approved" || topicName === "revoked" || topicName === "executed") {
-            const nativeValue = parseScVal(rawEv.value) as Record<string, unknown> | null;
-            if (nativeValue && typeof nativeValue === "object") {
-              const eventPropId = Number(nativeValue.id ?? -1);
-              if (eventPropId === proposalId) {
-                const rawActor = String(
-                  nativeValue.approver ?? nativeValue.executor ?? nativeValue.actor ?? ""
-                );
-                const actor = rawActor ? shortenAddr(rawActor) : "Unknown";
-                const timestamp = formatEventTimestamp(rawEv.ledgerClosedAt, rawEv.ledger);
+          const nativeValue = parseScVal(rawEv.value) as Record<string, unknown> | null;
+          let eventType = resolveEventType(firstTopic, secondTopic);
+          if (!eventType && nativeValue && typeof nativeValue === "object") {
+            const innerType = String(nativeValue.event ?? nativeValue.type ?? "").toLowerCase();
+            eventType = resolveEventType(innerType, "");
+          }
 
-                events.push({
-                  type: topicName as ProposalEventType,
-                  actor,
-                  timestamp,
-                  ledger: rawEv.ledger,
-                });
+          if (eventType && nativeValue && typeof nativeValue === "object") {
+            let eventPropId: number | null = null;
+            if (nativeValue.proposal_id !== undefined && nativeValue.proposal_id !== null) {
+              eventPropId = Number(nativeValue.proposal_id);
+            } else if (nativeValue.proposalId !== undefined && nativeValue.proposalId !== null) {
+              eventPropId = Number(nativeValue.proposalId);
+            } else if (nativeValue.proposal !== undefined && nativeValue.proposal !== null) {
+              eventPropId = Number(nativeValue.proposal);
+            } else if (nativeValue.id !== undefined && nativeValue.id !== null) {
+              eventPropId = Number(nativeValue.id);
+            } else if (nativeValue.schedule_id !== undefined && nativeValue.schedule_id !== null) {
+              eventPropId = Number(nativeValue.schedule_id);
+            } else if (nativeValue.scheduleId !== undefined && nativeValue.scheduleId !== null) {
+              eventPropId = Number(nativeValue.scheduleId);
+            } else if (nativeValue.schedule !== undefined && nativeValue.schedule !== null) {
+              eventPropId = Number(nativeValue.schedule);
+            } else if (topics.length > 1 && !isNaN(Number(topics[1]))) {
+              eventPropId = Number(topics[1]);
+            }
+
+            if (eventPropId === proposalId) {
+              const rawActor = String(
+                nativeValue.approver ??
+                  nativeValue.executor ??
+                  nativeValue.actor ??
+                  nativeValue.proposer ??
+                  nativeValue.caller ??
+                  nativeValue.sender ??
+                  nativeValue.admin ??
+                  nativeValue.owner ??
+                  ""
+              );
+              const actor = rawActor ? shortenAddr(rawActor) : "Unknown";
+              const timestamp = formatEventTimestamp(rawEv.ledgerClosedAt, rawEv.ledger);
+
+              const rawScheduleId =
+                nativeValue.schedule_id ??
+                nativeValue.scheduleId ??
+                nativeValue.schedule ??
+                nativeValue.schedule_number ??
+                (nativeValue.proposal_id !== undefined || nativeValue.proposalId !== undefined
+                  ? nativeValue.id
+                  : undefined) ??
+                (topics.length > 2 && !isNaN(Number(topics[2])) ? Number(topics[2]) : undefined);
+
+              const scheduleId =
+                rawScheduleId !== undefined && rawScheduleId !== null
+                  ? typeof rawScheduleId === "bigint" || typeof rawScheduleId === "number"
+                    ? Number(rawScheduleId)
+                    : String(rawScheduleId)
+                  : eventType.startsWith("recurring_payment") && nativeValue.id !== undefined
+                  ? Number(nativeValue.id)
+                  : undefined;
+
+              const rawAmount =
+                nativeValue.amount ??
+                nativeValue.disbursed_amount ??
+                nativeValue.disbursement_amount ??
+                nativeValue.payment_amount;
+
+              let amount: string | undefined;
+              if (rawAmount !== undefined && rawAmount !== null) {
+                if (typeof rawAmount === "bigint") {
+                  amount = stroopsToDisplay(rawAmount);
+                } else if (typeof rawAmount === "number") {
+                  amount =
+                    rawAmount >= 10_000_000
+                      ? stroopsToDisplay(BigInt(Math.round(rawAmount)))
+                      : String(rawAmount);
+                } else if (typeof rawAmount === "string") {
+                  if (/^\d{8,}$/.test(rawAmount)) {
+                    amount = stroopsToDisplay(BigInt(rawAmount));
+                  } else {
+                    amount = rawAmount;
+                  }
+                }
               }
+
+              const rawToken = nativeValue.token ?? nativeValue.asset;
+              const token = rawToken
+                ? String(rawToken).length > 12
+                  ? shortenAddr(String(rawToken))
+                  : String(rawToken)
+                : undefined;
+
+              const rawRecipient =
+                nativeValue.recipient ?? nativeValue.to ?? nativeValue.beneficiary;
+              const recipient = rawRecipient ? shortenAddr(String(rawRecipient)) : undefined;
+
+              const reason = nativeValue.reason ? String(nativeValue.reason) : undefined;
+
+              let details: string | undefined;
+              if (eventType === "recurring_payment_created") {
+                const parts: string[] = [];
+                if (scheduleId !== undefined) parts.push(`Schedule #${scheduleId}`);
+                if (amount) parts.push(token ? `${amount} ${token}` : amount);
+                if (recipient) parts.push(`to ${recipient}`);
+                if (parts.length > 0) details = parts.join(" · ");
+              } else if (eventType === "recurring_payment_disbursed") {
+                const parts: string[] = [];
+                if (scheduleId !== undefined) parts.push(`Schedule #${scheduleId}`);
+                if (amount) parts.push(token ? `${amount} ${token}` : amount);
+                if (recipient) parts.push(`to ${recipient}`);
+                if (parts.length > 0) details = parts.join(" · ");
+              } else if (eventType === "recurring_payment_paused") {
+                const parts: string[] = [];
+                if (scheduleId !== undefined) parts.push(`Schedule #${scheduleId}`);
+                if (reason) parts.push(reason);
+                if (parts.length > 0) details = parts.join(" · ");
+              } else if (eventType === "recurring_payment_cancelled") {
+                const parts: string[] = [];
+                if (scheduleId !== undefined) parts.push(`Schedule #${scheduleId}`);
+                if (reason) parts.push(reason);
+                if (parts.length > 0) details = parts.join(" · ");
+              } else if (eventType === "owner_weight_changed") {
+                if (nativeValue.old_weight !== undefined && nativeValue.new_weight !== undefined) {
+                  details = `Weight: ${nativeValue.old_weight} → ${nativeValue.new_weight}`;
+                }
+              }
+
+              events.push({
+                type: eventType,
+                actor,
+                timestamp,
+                ledger: rawEv.ledger,
+                scheduleId,
+                amount,
+                token,
+                recipient,
+                details,
+              });
             }
           }
         } catch (evErr) {
