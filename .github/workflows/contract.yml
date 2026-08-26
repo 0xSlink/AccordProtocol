@@ -40,6 +40,9 @@ jobs:
         run: |
           stellar contract build --release
 
+      - name: Run recurring-payment tests
+        run: cargo test -- recurring -- --nocapture
+
       - name: Generate wasm-manifest.json
         run: |
           python3 <<'PY'
@@ -73,6 +76,13 @@ jobs:
               raise SystemExit("Could not read soroban-sdk version from Cargo.toml")
           soroban_sdk_version = match.group(1)
 
+          # Probed: True if contract source includes recurring-payment types/entrypoints
+          try:
+              lib_rs = open("contracts/accord/src/lib.rs", encoding="utf-8").read()
+              supports_recurring_payments = "RecurringPayment" in lib_rs and "disburse_recurring" in lib_rs
+          except FileNotFoundError:
+              supports_recurring_payments = False
+
           manifest = {
               "wasm_file": os.path.basename(wasm_path),
               "wasm_hash": wasm_hash,
@@ -82,6 +92,7 @@ jobs:
               .isoformat()
               .replace("+00:00", "Z"),
               "soroban_sdk_version": soroban_sdk_version,
+              "supports_recurring_payments": supports_recurring_payments,
           }
 
           with open("wasm-manifest.json", "w", encoding="utf-8") as out:
