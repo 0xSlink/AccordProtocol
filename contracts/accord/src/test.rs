@@ -3,9 +3,9 @@
 extern crate std;
 
 use super::*;
-use std::format;
 use soroban_sdk::testutils::{Address as _, Events, Ledger as _};
 use soroban_sdk::{token, xdr, Address, BytesN, Env, IntoVal, String, Vec};
+use std::format;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -77,7 +77,15 @@ fn setup_with_timelock(
     // Fund the multisig contract so it can pay out proposals.
     token_sac.mint(&contract_id, &1_000_000_000_000_i128);
 
-    (env, client, owner_a, owner_b, owner_c, non_owner, token_client)
+    (
+        env,
+        client,
+        owner_a,
+        owner_b,
+        owner_c,
+        non_owner,
+        token_client,
+    )
 }
 
 // ─── Initialization ──────────────────────────────────────────────────────────
@@ -475,15 +483,9 @@ fn approve_transitions_pending_to_ready() {
         &ProposalCategory::Transfer,
     );
     client.approve(&owner_a, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
     client.approve(&owner_b, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Ready
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 }
 
 #[test]
@@ -557,15 +559,9 @@ fn revoke_transitions_ready_back_to_pending() {
     );
     client.approve(&owner_a, &id);
     client.approve(&owner_b, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Ready
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
     client.revoke(&owner_a, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
 
 #[test]
@@ -646,10 +642,7 @@ fn execute_transfers_tokens_to_recipient() {
     let before = token_client.balance(&recipient);
     client.execute(&owner_c, &id);
     assert_eq!(token_client.balance(&recipient) - before, amount);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Executed
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 #[test]
@@ -754,10 +747,7 @@ fn proposal_shows_expired_after_deadline() {
         &ProposalCategory::Transfer,
     );
     set_timestamp(&env, deadline + 1);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Expired
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Expired);
 }
 
 #[test]
@@ -940,30 +930,18 @@ fn full_lifecycle_2of3() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_a, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_b, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Ready
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 
     let before = token_client.balance(&recipient);
     client.execute(&owner_c, &id);
     assert_eq!(token_client.balance(&recipient) - before, amount);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Executed
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 #[test]
@@ -1009,48 +987,27 @@ fn full_lifecycle_5of5() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_a, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_b, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_c, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_d, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Pending
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     client.approve(&owner_e, &id);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Ready
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 
     let before = token_client.balance(&recipient);
     client.execute(&owner_a, &id);
     assert_eq!(token_client.balance(&recipient) - before, amount);
-    assert_eq!(
-        client.get_proposal(&id).status,
-        ProposalStatus::Executed
-    );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 #[test]
@@ -1374,17 +1331,49 @@ fn active_count_stays_accurate_after_expire() {
     let long_deadline = NOW + 10_000;
 
     // Create 2 proposals with a short deadline
-    client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Short 1"), &short_deadline, &ProposalCategory::Transfer);
-    client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Short 2"), &short_deadline, &ProposalCategory::Transfer);
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short 1"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short 2"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
 
     // Create 48 proposals with a long deadline
     for _ in 2..50 {
-        client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Long"), &long_deadline, &ProposalCategory::Transfer);
+        client.create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Long"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        );
     }
 
     // 51st proposal should fail
     assert_eq!(
-        client.try_create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Overflow"), &long_deadline, &ProposalCategory::Transfer),
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
 
@@ -1392,20 +1381,50 @@ fn active_count_stays_accurate_after_expire() {
     set_timestamp(&env, short_deadline + 1);
 
     // Calling execute on expired proposals returns ProposalExpired and frees the active slot.
-    assert_eq!(client.try_execute(&owner_a, &1), Err(Ok(ContractError::ProposalExpired)));
+    assert_eq!(
+        client.try_execute(&owner_a, &1),
+        Err(Ok(ContractError::ProposalExpired))
+    );
     assert_eq!(client.get_proposal(&1).status, ProposalStatus::Expired);
-    assert_eq!(client.try_execute(&owner_a, &2), Err(Ok(ContractError::ProposalExpired)));
+    assert_eq!(
+        client.try_execute(&owner_a, &2),
+        Err(Ok(ContractError::ProposalExpired))
+    );
     assert_eq!(client.get_proposal(&2).status, ProposalStatus::Expired);
 
     // Now we should be able to create 2 more proposals
-    let id51 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "New 1"), &long_deadline, &ProposalCategory::Transfer);
-    let id52 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "New 2"), &long_deadline, &ProposalCategory::Transfer);
+    let id51 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 1"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    let id52 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 2"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
     assert_eq!(id51, 51);
     assert_eq!(id52, 52);
 
     // And the 53rd should fail again
     assert_eq!(
-        client.try_create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Overflow 2"), &long_deadline, &ProposalCategory::Transfer),
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
 }
@@ -1419,16 +1438,40 @@ fn active_count_stays_accurate_mixed() {
     let long_deadline = NOW + 10_000;
 
     // Create 1 short deadline
-    client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Short 1"), &short_deadline, &ProposalCategory::Transfer);
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short 1"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
 
     // Create 49 long deadline
     for _ in 1..50 {
-        client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Long"), &long_deadline, &ProposalCategory::Transfer);
+        client.create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Long"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        );
     }
 
     // 51st proposal should fail
     assert_eq!(
-        client.try_create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Overflow"), &long_deadline, &ProposalCategory::Transfer),
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
 
@@ -1439,23 +1482,50 @@ fn active_count_stays_accurate_mixed() {
     assert_eq!(client.get_proposal(&2).status, ProposalStatus::Executed);
 
     // Create 1 new proposal (long deadline)
-    let id51 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "New 1"), &long_deadline, &ProposalCategory::Transfer);
+    let id51 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 1"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
     assert_eq!(id51, 51);
 
     // Advance time past the short deadline
     set_timestamp(&env, short_deadline + 1);
 
     // Calling execute on expired proposal 1 returns ProposalExpired and frees its active slot.
-    assert_eq!(client.try_execute(&owner_a, &1), Err(Ok(ContractError::ProposalExpired)));
+    assert_eq!(
+        client.try_execute(&owner_a, &1),
+        Err(Ok(ContractError::ProposalExpired))
+    );
     assert_eq!(client.get_proposal(&1).status, ProposalStatus::Expired);
 
     // Create 1 new proposal (long deadline)
-    let id52 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "New 2"), &long_deadline, &ProposalCategory::Transfer);
+    let id52 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 2"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
     assert_eq!(id52, 52);
 
     // 53rd proposal should fail
     assert_eq!(
-        client.try_create_proposal(&owner_a, &recipient, &1_000_000_i128, &token_client.address, &str(&env, "Overflow 2"), &long_deadline, &ProposalCategory::Transfer),
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
 }
@@ -1467,10 +1537,24 @@ fn cancel_expired_sweeps_two_expired_proposals() {
     let (env, client, owner_a, _, _, _, token_client) = setup(1);
     let recipient = Address::generate(&env);
 
-    let id1 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "p1"), &DEADLINE, &ProposalCategory::Transfer);
-    let id2 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "p2"), &DEADLINE, &ProposalCategory::Transfer);
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "p1"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let id2 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "p2"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
 
     set_timestamp(&env, DEADLINE + 1);
 
@@ -1490,10 +1574,24 @@ fn cancel_expired_skips_non_expired_proposal() {
     let (env, client, owner_a, _, _, _, token_client) = setup(1);
     let recipient = Address::generate(&env);
 
-    let id1 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "short"), &DEADLINE, &ProposalCategory::Transfer);
-    let id2 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "long"), &long_deadline, &ProposalCategory::Transfer);
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "short"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let id2 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "long"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
 
     set_timestamp(&env, DEADLINE + 1);
 
@@ -1511,8 +1609,15 @@ fn cancel_expired_skips_nonexistent_id() {
     let (env, client, owner_a, _, _, _, token_client) = setup(1);
     let recipient = Address::generate(&env);
 
-    let id1 = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "real"), &DEADLINE, &ProposalCategory::Transfer);
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "real"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
 
     set_timestamp(&env, DEADLINE + 1);
 
@@ -1529,8 +1634,15 @@ fn cancel_expired_rejects_non_owner() {
     let (env, client, owner_a, _, _, non_owner, token_client) = setup(1);
     let recipient = Address::generate(&env);
 
-    client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "x"), &DEADLINE, &ProposalCategory::Transfer);
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "x"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
 
     set_timestamp(&env, DEADLINE + 1);
 
@@ -1549,13 +1661,27 @@ fn cancel_expired_unblocks_active_cap() {
     let recipient = Address::generate(&env);
 
     for _ in 0..50 {
-        client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-            &token_client.address, &str(&env, "fill"), &DEADLINE, &ProposalCategory::Transfer);
+        client.create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "fill"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
+        );
     }
 
     assert_eq!(
-        client.try_create_proposal(&owner_a, &recipient, &1_000_000_i128,
-            &token_client.address, &str(&env, "over"), &DEADLINE, &ProposalCategory::Transfer),
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "over"),
+            &DEADLINE,
+            &ProposalCategory::Transfer
+        ),
         Err(Ok(ContractError::TooManyActiveProposals))
     );
 
@@ -1568,8 +1694,15 @@ fn cancel_expired_unblocks_active_cap() {
     let swept = client.cancel_expired(&owner_a, &ids);
     assert_eq!(swept, 50);
 
-    let new_id = client.create_proposal(&owner_a, &recipient, &1_000_000_i128,
-        &token_client.address, &str(&env, "new"), &(DEADLINE + 86_400), &ProposalCategory::Transfer);
+    let new_id = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "new"),
+        &(DEADLINE + 86_400),
+        &ProposalCategory::Transfer,
+    );
     assert_eq!(new_id, 51);
 }
 
@@ -1650,4 +1783,155 @@ fn create_add_owner_proposal_rejects_at_max_owners() {
         ),
         Err(Ok(ContractError::InvalidOwners))
     );
+}
+
+// ─── Recurring Payments ─────────────────────────────────────────────────────
+
+#[test]
+fn disburse_recurring_fails_cleanly_when_treasury_is_short() {
+    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+    let amount: i128 = 1_000_000;
+    let cap: i128 = 10_000_000;
+
+    let schedule_id = client.create_recurring_payment(
+        &owner_a,
+        &recipient,
+        &amount,
+        &token_client.address,
+        &60_u64,
+        &NOW,
+        &Option::<u64>::None,
+        &Option::<u64>::None,
+        &Option::<i128>::Some(cap),
+        &ProposalCategory::Payroll,
+    );
+
+    let before = client.get_recurring_payment(&schedule_id);
+    let treasury = client.address.clone();
+    let balance = token_client.balance(&treasury);
+    let keep = amount - 1;
+    let drain = balance - keep;
+    token_client.transfer(&treasury, &Address::generate(&env), &drain);
+
+    assert_eq!(
+        client.try_disburse_recurring(&owner_b, &schedule_id),
+        Err(Ok(ContractError::TransferFailed))
+    );
+
+    let after = client.get_recurring_payment(&schedule_id);
+    assert_eq!(after.last_disbursed_at, before.last_disbursed_at);
+    assert_eq!(after.total_disbursed, before.total_disbursed);
+    assert_eq!(after.periods_disbursed, before.periods_disbursed);
+}
+
+#[test]
+fn create_recurring_payment_proposal_enforces_spending_limit() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+    let low_limit: i128 = 5_000_000;
+
+    client.set_spending_limit(&owner_a, &owner_a, &token_client.address, &low_limit);
+
+    assert_eq!(
+        client.try_create_recurring_payment(
+            &owner_a,
+            &recipient,
+            &6_000_000_i128,
+            &token_client.address,
+            &60_u64,
+            &NOW,
+            &Option::<u64>::None,
+            &Option::<u64>::None,
+            &Option::<i128>::Some(10_000_000_i128),
+            &ProposalCategory::Payroll,
+        ),
+        Err(Ok(ContractError::SpendingLimitExceeded))
+    );
+
+    let id = client.create_recurring_payment(
+        &owner_a,
+        &recipient,
+        &4_000_000_i128,
+        &token_client.address,
+        &60_u64,
+        &NOW,
+        &Option::<u64>::None,
+        &Option::<u64>::None,
+        &Option::<i128>::Some(10_000_000_i128),
+        &ProposalCategory::Payroll,
+    );
+    assert!(id > 0);
+    let schedule = client.get_recurring_payment(&id);
+    assert_eq!(schedule.amount, 4_000_000_i128);
+}
+
+#[test]
+fn recurring_payment_disbursement_invariant_holds_over_randomized_sequences() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+
+    for seed in 1_u64..=16 {
+        set_timestamp(&env, NOW);
+        let recipient = Address::generate(&env);
+        let amount: i128 = 100;
+        let cap: i128 = 700;
+
+        let schedule_id = client.create_recurring_payment(
+            &owner_a,
+            &recipient,
+            &amount,
+            &token_client.address,
+            &5_u64,
+            &NOW,
+            &Option::<u64>::None,
+            &Option::<u64>::None,
+            &Option::<i128>::Some(cap),
+            &ProposalCategory::Payroll,
+        );
+
+        let mut current_ts = NOW;
+        let mut state = seed;
+        for _ in 0..24 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            if state & 1 == 0 {
+                let delta = (state % 20) + 1;
+                current_ts = current_ts.saturating_add(delta);
+                set_timestamp(&env, current_ts);
+            }
+
+            let before = client.get_recurring_payment(&schedule_id);
+            let due_at = if before.periods_disbursed == 0 {
+                before
+                    .cliff
+                    .map_or(before.start, |cliff| cliff.max(before.start))
+            } else {
+                before.last_disbursed_at.saturating_add(before.interval)
+            };
+            let projected_total = before.total_disbursed.saturating_add(before.amount);
+            let should_succeed = current_ts >= due_at && projected_total <= cap;
+
+            let result = client.try_disburse_recurring(&owner_a, &schedule_id);
+            let after = client.get_recurring_payment(&schedule_id);
+
+            if should_succeed {
+                assert!(result.is_ok());
+                assert_eq!(after.total_disbursed, projected_total);
+                assert_eq!(
+                    after.total_disbursed,
+                    before.total_disbursed.saturating_add(amount)
+                );
+                assert_eq!(
+                    after.periods_disbursed,
+                    before.periods_disbursed.saturating_add(1)
+                );
+                assert_eq!(after.last_disbursed_at, current_ts);
+                assert!(after.total_disbursed <= cap);
+            } else {
+                assert!(result.is_err());
+                assert_eq!(before.last_disbursed_at, after.last_disbursed_at);
+                assert_eq!(before.total_disbursed, after.total_disbursed);
+                assert_eq!(before.periods_disbursed, after.periods_disbursed);
+            }
+        }
+    }
 }

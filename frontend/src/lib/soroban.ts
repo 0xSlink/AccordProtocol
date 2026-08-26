@@ -49,7 +49,16 @@ const CONTRACT_ERRORS: Record<string, string> = {
   "22": "Invalid recipient address.",
   "23": "Time lock is still active. Please wait.",
   "24": "Removing this owner would break the required threshold.",
-  "25": "Owner not found."
+  "25": "Owner not found.",
+  "26": "Contract is frozen.",
+  "27": "No guardian has been configured.",
+  "28": "Invalid recurring interval.",
+  "29": "Invalid recurring schedule dates.",
+  "30": "Recurring cap must be at least the payment amount.",
+  "31": "This proposal exceeds the current spending limit.",
+  "32": "Recurring payment not found.",
+  "33": "Recurring payment is not due yet.",
+  "34": "Recurring payment has completed or reached its cap.",
 };
 
 export function contractErrorMessage(error: string): string {

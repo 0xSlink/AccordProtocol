@@ -2,8 +2,8 @@
 pub mod validate;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN,
-    Env, IntoVal, String, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    IntoVal, String, Symbol, Val, Vec,
 };
 
 // ─── Data Types ─────────────────────────────────────────────────────────────
@@ -107,6 +107,44 @@ pub struct UnfrozenEvent {
     pub approvers: Vec<Address>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SpendingLimit {
+    pub limit: i128,
+    pub spent: i128,
+    pub window_started_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPaymentSchedule {
+    pub id: u64,
+    pub proposer: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub token: Address,
+    pub interval: u64,
+    pub start: u64,
+    pub cliff: Option<u64>,
+    pub end: Option<u64>,
+    pub cap: Option<i128>,
+    pub category: ProposalCategory,
+    pub last_disbursed_at: u64,
+    pub total_disbursed: i128,
+    pub periods_disbursed: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPaymentDisbursedEvent {
+    pub schedule_id: u64,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub total_disbursed: i128,
+    pub periods_disbursed: u32,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -140,6 +178,13 @@ pub enum ContractError {
     OwnerNotFound = 25,
     ContractFrozen = 26,
     NoGuardian = 27,
+    InvalidInterval = 28,
+    InvalidSchedule = 29,
+    InvalidCap = 30,
+    SpendingLimitExceeded = 31,
+    RecurringPaymentNotFound = 32,
+    RecurringPaymentNotDue = 33,
+    RecurringPaymentComplete = 34,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -182,6 +227,18 @@ fn guardian_key() -> Symbol {
 
 fn frozen_key() -> Symbol {
     symbol_short!("FROZEN")
+}
+
+fn recurring_next_id_key() -> Symbol {
+    symbol_short!("RPNEXT")
+}
+
+fn recurring_payment_key(id: u64) -> (Symbol, u64) {
+    (symbol_short!("RPAY"), id)
+}
+
+fn spending_limit_key(owner: &Address, token: &Address) -> (Symbol, Address, Address) {
+    (symbol_short!("SPLIM"), owner.clone(), token.clone())
 }
 
 // ─── TTL Constants ───────────────────────────────────────────────────────────
@@ -236,6 +293,12 @@ const MAX_ACTIVE_PROPOSALS: u32 = 50;
 const MAX_OWNERS: u32 = 20;
 /// Maximum proposal lifetime: 90 days.
 const MAX_PROPOSAL_DURATION: u64 = 7_776_000;
+/// Minimum recurring payment interval: 1 second.
+const MIN_RECURRING_INTERVAL: u64 = 1;
+/// Maximum recurring payment interval: 365 days.
+const MAX_RECURRING_INTERVAL: u64 = 31_536_000;
+/// Spending-limit accounting window: 30 days.
+const SPENDING_LIMIT_WINDOW: u64 = 2_592_000;
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
@@ -265,7 +328,11 @@ fn read_owners(env: &Env) -> Result<Vec<Address>, ContractError> {
 }
 
 fn read_next_id(env: &Env) -> u64 {
-    let id = env.storage().instance().get(&next_id_key()).unwrap_or(1_u64);
+    let id = env
+        .storage()
+        .instance()
+        .get(&next_id_key())
+        .unwrap_or(1_u64);
     bump_instance(env);
     id
 }
@@ -310,7 +377,11 @@ fn write_approval(env: &Env, proposal_id: u64, owner: &Address, approved: bool) 
 fn read_active_count(env: &Env) -> u32 {
     // Recompute active proposals (Pending + Ready) to ensure expired/ executed
     // proposals are not counted, guarding against any missed decrements.
-    let next_id = env.storage().instance().get(&next_id_key()).unwrap_or(1_u64);
+    let next_id = env
+        .storage()
+        .instance()
+        .get(&next_id_key())
+        .unwrap_or(1_u64);
     let mut active: u32 = 0;
     for id in 1..next_id {
         if let Ok(proposal) = read_proposal(env, id) {
@@ -348,6 +419,53 @@ fn is_frozen_state(env: &Env) -> bool {
 fn write_frozen(env: &Env, frozen: bool) {
     env.storage().instance().set(&frozen_key(), &frozen);
     bump_instance(env);
+}
+
+fn read_recurring_next_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&recurring_next_id_key())
+        .unwrap_or(1_u64);
+    bump_instance(env);
+    id
+}
+
+fn write_recurring_next_id(env: &Env, id: u64) {
+    env.storage().instance().set(&recurring_next_id_key(), &id);
+    bump_instance(env);
+}
+
+fn read_recurring_payment(env: &Env, id: u64) -> Result<RecurringPaymentSchedule, ContractError> {
+    let key = recurring_payment_key(id);
+    let schedule = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContractError::RecurringPaymentNotFound)?;
+    bump_persistent(env, &key);
+    Ok(schedule)
+}
+
+fn write_recurring_payment(env: &Env, schedule: &RecurringPaymentSchedule) {
+    let key = recurring_payment_key(schedule.id);
+    env.storage().persistent().set(&key, schedule);
+    bump_persistent(env, &key);
+}
+
+fn read_spending_limit(env: &Env, owner: &Address, token: &Address) -> Option<SpendingLimit> {
+    let key = spending_limit_key(owner, token);
+    let limit = env.storage().persistent().get(&key);
+    if env.storage().persistent().has(&key) {
+        bump_persistent(env, &key);
+    }
+    limit
+}
+
+fn write_spending_limit(env: &Env, owner: &Address, token: &Address, limit: &SpendingLimit) {
+    let key = spending_limit_key(owner, token);
+    env.storage().persistent().set(&key, limit);
+    bump_persistent(env, &key);
 }
 
 fn require_not_frozen(env: &Env) -> Result<(), ContractError> {
@@ -390,13 +508,92 @@ fn derive_status(env: &Env, proposal: &Proposal) -> ProposalStatus {
 fn validate_token(env: &Env, token_address: &Address) -> Result<(), ContractError> {
     let client = token::Client::new(env, token_address);
     // Require decimals, symbol, and name to all succeed to consider this a valid token.
-    if client.try_decimals().is_err()
-        || client.try_symbol().is_err()
-        || client.try_name().is_err()
+    if client.try_decimals().is_err() || client.try_symbol().is_err() || client.try_name().is_err()
     {
         return Err(ContractError::InvalidToken);
     }
     Ok(())
+}
+
+fn validate_recurring_payment(
+    env: &Env,
+    recipient: &Address,
+    amount: i128,
+    token_address: &Address,
+    interval: u64,
+    start: u64,
+    cliff: &Option<u64>,
+    end: &Option<u64>,
+    cap: &Option<i128>,
+) -> Result<(), ContractError> {
+    if amount < MIN_AMOUNT {
+        return Err(ContractError::InvalidAmount);
+    }
+    if interval < MIN_RECURRING_INTERVAL || interval > MAX_RECURRING_INTERVAL {
+        return Err(ContractError::InvalidInterval);
+    }
+    validate_token(env, token_address)?;
+    if recipient == &env.current_contract_address() {
+        return Err(ContractError::InvalidRecipient);
+    }
+    if let Some(end_at) = end {
+        if *end_at <= start {
+            return Err(ContractError::InvalidSchedule);
+        }
+        if let Some(cliff_at) = cliff {
+            if cliff_at > end_at {
+                return Err(ContractError::InvalidSchedule);
+            }
+        }
+    }
+    if let Some(total_cap) = cap {
+        if *total_cap < amount {
+            return Err(ContractError::InvalidCap);
+        }
+    }
+    Ok(())
+}
+
+fn reserve_spending_limit(
+    env: &Env,
+    owner: &Address,
+    token_address: &Address,
+    amount: i128,
+) -> Result<(), ContractError> {
+    let Some(mut limit) = read_spending_limit(env, owner, token_address) else {
+        return Ok(());
+    };
+
+    let now = env.ledger().timestamp();
+    if now.saturating_sub(limit.window_started_at) >= SPENDING_LIMIT_WINDOW {
+        limit.window_started_at = now;
+        limit.spent = 0;
+    }
+
+    let next_spent = limit
+        .spent
+        .checked_add(amount)
+        .ok_or(ContractError::ArithmeticError)?;
+    if next_spent > limit.limit {
+        return Err(ContractError::SpendingLimitExceeded);
+    }
+
+    limit.spent = next_spent;
+    write_spending_limit(env, owner, token_address, &limit);
+    Ok(())
+}
+
+fn recurring_payment_due_at(schedule: &RecurringPaymentSchedule) -> Result<u64, ContractError> {
+    if schedule.periods_disbursed == 0 {
+        return Ok(match schedule.cliff {
+            Some(cliff) if cliff > schedule.start => cliff,
+            _ => schedule.start,
+        });
+    }
+    schedule
+        .last_disbursed_at
+        .checked_add(schedule.interval)
+        .ok_or(ContractError::ArithmeticError)
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -451,7 +648,9 @@ impl AccordContract {
         bump_persistent(&env, &key);
 
         env.storage().instance().set(&threshold_key(), &threshold);
-        env.storage().instance().set(&timelock_key(), &time_lock_delay);
+        env.storage()
+            .instance()
+            .set(&timelock_key(), &time_lock_delay);
         env.storage().instance().set(&init_key(), &true);
         bump_instance(&env);
 
@@ -541,6 +740,164 @@ impl AccordContract {
         );
 
         Ok(id)
+    }
+
+    /// Sets or replaces a 30-day spending limit for an owner/token pair.
+    pub fn set_spending_limit(
+        env: Env,
+        caller: Address,
+        owner: Address,
+        token: Address,
+        limit: i128,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        require_owner(&env, &caller)?;
+        require_owner(&env, &owner)?;
+        require_not_frozen(&env)?;
+
+        if limit < MIN_AMOUNT {
+            return Err(ContractError::InvalidAmount);
+        }
+        validate_token(&env, &token)?;
+
+        let spending_limit = SpendingLimit {
+            limit,
+            spent: 0,
+            window_started_at: env.ledger().timestamp(),
+        };
+        write_spending_limit(&env, &owner, &token, &spending_limit);
+
+        Ok(())
+    }
+
+    /// Creates an active recurring payment schedule after validating the
+    /// proposer's current spending-limit window against the first period.
+    pub fn create_recurring_payment(
+        env: Env,
+        proposer: Address,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+        interval: u64,
+        start: u64,
+        cliff: Option<u64>,
+        end: Option<u64>,
+        cap: Option<i128>,
+        category: ProposalCategory,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        validate_recurring_payment(
+            &env, &recipient, amount, &token, interval, start, &cliff, &end, &cap,
+        )?;
+        reserve_spending_limit(&env, &proposer, &token, amount)?;
+
+        let id = read_recurring_next_id(&env);
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_recurring_next_id(&env, next_id);
+
+        let schedule = RecurringPaymentSchedule {
+            id,
+            proposer,
+            recipient,
+            amount,
+            token,
+            interval,
+            start,
+            cliff,
+            end,
+            cap,
+            category,
+            last_disbursed_at: 0,
+            total_disbursed: 0,
+            periods_disbursed: 0,
+        };
+        write_recurring_payment(&env, &schedule);
+
+        Ok(id)
+    }
+
+    /// Disburses one due period for a recurring payment schedule.
+    pub fn disburse_recurring(
+        env: Env,
+        caller: Address,
+        schedule_id: u64,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        require_owner(&env, &caller)?;
+        require_not_frozen(&env)?;
+
+        let mut schedule = read_recurring_payment(&env, schedule_id)?;
+        let now = env.ledger().timestamp();
+        let due_at = recurring_payment_due_at(&schedule)?;
+
+        if now < due_at {
+            return Err(ContractError::RecurringPaymentNotDue);
+        }
+        if let Some(end_at) = schedule.end {
+            if due_at > end_at || now > end_at {
+                return Err(ContractError::RecurringPaymentComplete);
+            }
+        }
+        let projected_total = schedule
+            .total_disbursed
+            .checked_add(schedule.amount)
+            .ok_or(ContractError::ArithmeticError)?;
+        if let Some(total_cap) = schedule.cap {
+            if projected_total > total_cap {
+                return Err(ContractError::RecurringPaymentComplete);
+            }
+        }
+
+        let token_client = token::Client::new(&env, &schedule.token);
+        let treasury = env.current_contract_address();
+        let balance = token_client.balance(&treasury);
+        if balance < schedule.amount {
+            return Err(ContractError::TransferFailed);
+        }
+        if token_client
+            .try_transfer(&treasury, &schedule.recipient, &schedule.amount)
+            .is_err()
+        {
+            return Err(ContractError::TransferFailed);
+        }
+
+        schedule.last_disbursed_at = now;
+        schedule.total_disbursed = projected_total;
+        schedule.periods_disbursed = schedule
+            .periods_disbursed
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticError)?;
+        write_recurring_payment(&env, &schedule);
+
+        env.events().publish(
+            (symbol_short!("rpay"),),
+            RecurringPaymentDisbursedEvent {
+                schedule_id,
+                recipient: schedule.recipient.clone(),
+                token: schedule.token.clone(),
+                amount: schedule.amount,
+                total_disbursed: schedule.total_disbursed,
+                periods_disbursed: schedule.periods_disbursed,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Returns a recurring payment schedule by ID.
+    pub fn get_recurring_payment(
+        env: Env,
+        schedule_id: u64,
+    ) -> Result<RecurringPaymentSchedule, ContractError> {
+        read_recurring_payment(&env, schedule_id)
+    }
+
+    /// Returns an owner's current spending-limit window for a token, if set.
+    pub fn get_spending_limit(env: Env, owner: Address, token: Address) -> Option<SpendingLimit> {
+        read_spending_limit(&env, &owner, &token)
     }
 
     /// Creates a proposal to add a new owner to the multisig.
@@ -785,11 +1142,7 @@ impl AccordContract {
     ///
     /// Automatically transitions the proposal to `Ready` when the approval count reaches threshold.
     /// Records `ready_at` the first time the threshold is crossed.
-    pub fn approve(
-        env: Env,
-        approver: Address,
-        proposal_id: u64,
-    ) -> Result<(), ContractError> {
+    pub fn approve(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
         require_owner(&env, &approver)?;
 
@@ -841,11 +1194,7 @@ impl AccordContract {
     ///
     /// The proposal status is recalculated after the revoke: if approvals fall below
     /// threshold the status transitions back to `Pending`.
-    pub fn revoke(
-        env: Env,
-        approver: Address,
-        proposal_id: u64,
-    ) -> Result<(), ContractError> {
+    pub fn revoke(env: Env, approver: Address, proposal_id: u64) -> Result<(), ContractError> {
         approver.require_auth();
         require_owner(&env, &approver)?;
 
@@ -891,11 +1240,7 @@ impl AccordContract {
     ///
     /// Enforces the time-lock delay: execution is blocked until `ready_at + time_lock_delay`
     /// has elapsed.
-    pub fn execute(
-        env: Env,
-        executor: Address,
-        proposal_id: u64,
-    ) -> Result<(), ContractError> {
+    pub fn execute(env: Env, executor: Address, proposal_id: u64) -> Result<(), ContractError> {
         executor.require_auth();
         require_owner(&env, &executor)?;
         require_not_frozen(&env)?;
@@ -922,11 +1267,7 @@ impl AccordContract {
         }
 
         // Time-lock enforcement.
-        let time_lock_delay: u64 = env
-            .storage()
-            .instance()
-            .get(&timelock_key())
-            .unwrap_or(0);
+        let time_lock_delay: u64 = env.storage().instance().get(&timelock_key()).unwrap_or(0);
         if time_lock_delay > 0 {
             let now = env.ledger().timestamp();
             if now < proposal.ready_at.saturating_add(time_lock_delay) {
@@ -964,7 +1305,9 @@ impl AccordContract {
                 bump_persistent(&env, &key);
             }
             ProposalKind::ChangeThreshold(new_threshold) => {
-                env.storage().instance().set(&threshold_key(), new_threshold);
+                env.storage()
+                    .instance()
+                    .set(&threshold_key(), new_threshold);
                 bump_instance(&env);
             }
         }
@@ -995,11 +1338,7 @@ impl AccordContract {
     /// Only owners may call this function.
     ///
     /// Returns the number of proposals actually swept.
-    pub fn cancel_expired(
-        env: Env,
-        caller: Address,
-        ids: Vec<u64>,
-    ) -> Result<u32, ContractError> {
+    pub fn cancel_expired(env: Env, caller: Address, ids: Vec<u64>) -> Result<u32, ContractError> {
         caller.require_auth();
         require_owner(&env, &caller)?;
 
@@ -1089,10 +1428,7 @@ impl AccordContract {
 
     /// Returns the time-lock delay in seconds. A value of 0 means no delay.
     pub fn get_time_lock_delay(env: Env) -> u64 {
-        env.storage()
-            .instance()
-            .get(&timelock_key())
-            .unwrap_or(0)
+        env.storage().instance().get(&timelock_key()).unwrap_or(0)
     }
 
     /// Returns the total number of proposals ever created.
@@ -1163,10 +1499,8 @@ impl AccordContract {
 
         write_frozen(&env, true);
 
-        env.events().publish(
-            (symbol_short!("frozen"),),
-            FrozenEvent { guardian },
-        );
+        env.events()
+            .publish((symbol_short!("frozen"),), FrozenEvent { guardian });
 
         Ok(())
     }
