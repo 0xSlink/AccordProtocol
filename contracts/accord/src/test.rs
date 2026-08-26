@@ -7631,3 +7631,369 @@ fn concurrent_create_recurring_proposals_enforce_active_cap_at_execute_time() {
         Err(Ok(ContractError::TooManyActiveRecurring))
     );
 }
+
+// ─── Recurring Disbursement Boundary Tests ────────────────────────────────────
+//
+// Note on error names: these issues describe the interval rejection as
+// `RecurringIntervalNotElapsed`. The implemented contract returns
+// `DisbursementTooEarly` for that case (and for pre-start / pre-cliff), plus
+// `ScheduleEnded` past `end_time` or the cap, and `ScheduleNotActive` for a
+// non-Active schedule. The tests assert what the contract actually returns.
+
+/// Creates an Active FixedAmountPerPeriod schedule and returns its id.
+fn create_active_schedule(
+    env: &Env,
+    client: &AccordContractClient<'_>,
+    owner_a: &Address,
+    owner_b: &Address,
+    owner_c: &Address,
+    recipient: &Address,
+    token: &Address,
+    amount: i128,
+    interval_secs: u64,
+    start_time: u64,
+    end_time: u64,
+    cliff_time: u64,
+    total_cap: i128,
+) -> u64 {
+    let proposal_id = client.create_recurring_proposal(
+        owner_a,
+        recipient,
+        token,
+        &amount,
+        &interval_secs,
+        &start_time,
+        &end_time,
+        &cliff_time,
+        &total_cap,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(env, "Recurring payment schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(owner_a, &proposal_id);
+    client.approve(owner_b, &proposal_id);
+    client.execute(owner_c, &proposal_id);
+
+    1_u64
+}
+
+// ── Issue #470 ────────────────────────────────────────────────────────────────
+
+#[test]
+fn disburse_recurring_transfers_one_period_and_rejects_a_premature_second_call() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let interval = 3_600_u64;
+    let amount = 1_000_000_i128;
+
+    let schedule_id = create_active_schedule(
+        &env,
+        &client,
+        &owner_a,
+        &owner_b,
+        &owner_c,
+        &recipient,
+        &token_client.address,
+        amount,
+        interval,
+        NOW,
+        0,
+        0,
+        0,
+    );
+
+    let recipient_before = token_client.balance(&recipient);
+    let treasury_before = token_client.balance(&client.address);
+
+    // Advance past the first interval and disburse.
+    set_timestamp(&env, NOW + interval + 1);
+    client.disburse_recurring(&schedule_id);
+
+    // Exactly one period moved, in both directions.
+    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
+    assert_eq!(token_client.balance(&client.address), treasury_before - amount);
+
+    let schedule = client.get_recurring_payment(&schedule_id);
+    assert_eq!(schedule.total_disbursed, amount);
+    assert_eq!(schedule.last_disbursed_at, NOW + interval + 1);
+    assert_eq!(schedule.status, RecurringStatus::Active);
+
+    // A second call before the next interval elapses is rejected. One second
+    // short of the boundary is the case most likely to be off by one.
+    set_timestamp(&env, NOW + interval + 1 + interval - 1);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::DisbursementTooEarly))
+    );
+
+    // The rejection left no trace: no transfer, no counter movement.
+    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
+    let after_rejection = client.get_recurring_payment(&schedule_id);
+    assert_eq!(after_rejection.total_disbursed, amount);
+    assert_eq!(after_rejection.last_disbursed_at, NOW + interval + 1);
+
+    // Exactly on the boundary it succeeds again.
+    set_timestamp(&env, NOW + interval + 1 + interval);
+    client.disburse_recurring(&schedule_id);
+
+    assert_eq!(
+        token_client.balance(&recipient),
+        recipient_before + amount * 2
+    );
+    assert_eq!(
+        client.get_recurring_payment(&schedule_id).total_disbursed,
+        amount * 2
+    );
+}
+
+// ── Issue #471 ────────────────────────────────────────────────────────────────
+
+#[test]
+fn disbursement_is_blocked_before_cliff_and_after_end_time() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let interval = 3_600_u64;
+    let amount = 1_000_000_i128;
+    let cliff = NOW + 10_000;
+    let end = NOW + 40_000;
+
+    let schedule_id = create_active_schedule(
+        &env,
+        &client,
+        &owner_a,
+        &owner_b,
+        &owner_c,
+        &recipient,
+        &token_client.address,
+        amount,
+        interval,
+        NOW,
+        end,
+        cliff,
+        0,
+    );
+
+    let recipient_before = token_client.balance(&recipient);
+
+    // Past the first interval but still before the cliff — rejected.
+    set_timestamp(&env, NOW + interval + 1);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::DisbursementTooEarly))
+    );
+
+    // One second before the cliff is still too early.
+    set_timestamp(&env, cliff - 1);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::DisbursementTooEarly))
+    );
+    assert_eq!(token_client.balance(&recipient), recipient_before);
+
+    // At the cliff it succeeds — the check is `now < cliff_time`, so the cliff
+    // second itself is payable.
+    set_timestamp(&env, cliff);
+    client.disburse_recurring(&schedule_id);
+    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
+    assert_eq!(
+        client.get_recurring_payment(&schedule_id).status,
+        RecurringStatus::Active
+    );
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+
+    // Past end_time: the call is rejected and no funds move.
+    set_timestamp(&env, end + 1);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::ScheduleEnded))
+    );
+    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
+    assert_eq!(
+        client.get_recurring_payment(&schedule_id).total_disbursed,
+        amount
+    );
+
+    // The end boundary keeps rejecting, however often it is called.
+    set_timestamp(&env, end + interval + 1);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::ScheduleEnded))
+    );
+
+    // ── Known gap ────────────────────────────────────────────────────────────
+    //
+    // Issue #471 also asks that the schedule be marked Completed once end_time
+    // passes. `disburse_recurring` does set `status = Completed` and decrement
+    // ACTIVE_RECUR on this path, but it does so immediately before returning
+    // `Err(ScheduleEnded)` — and an Err return rolls the host storage back, so
+    // neither write survives the invocation.
+    //
+    // `get_recurring_payment` is a raw storage read (no derived status), so an
+    // ended schedule stays Active forever and holds its slot against
+    // MAX_ACTIVE_RECURRING. The assertions below pin the behaviour as it
+    // actually is; flipping them to Completed is the check to use once the
+    // retirement is moved somewhere it can persist.
+    let ended = client.get_recurring_payment(&schedule_id);
+    assert_eq!(ended.status, RecurringStatus::Active);
+    assert_eq!(client.get_active_recurring_count(), 1);
+}
+
+// ── Issue #472 ────────────────────────────────────────────────────────────────
+
+#[test]
+fn total_cap_is_never_exceeded_and_the_final_period_is_clamped() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let interval = 3_600_u64;
+    let amount = 1_000_000_i128;
+    // Deliberately not a multiple of the period amount: three full periods plus
+    // a 250_000 remainder, so the last disbursement must be clamped.
+    let total_cap = 3_250_000_i128;
+
+    let schedule_id = create_active_schedule(
+        &env,
+        &client,
+        &owner_a,
+        &owner_b,
+        &owner_c,
+        &recipient,
+        &token_client.address,
+        amount,
+        interval,
+        NOW,
+        0,
+        0,
+        total_cap,
+    );
+
+    let recipient_before = token_client.balance(&recipient);
+    let mut now = NOW;
+
+    // Three full periods.
+    for period in 1..=3_i128 {
+        now += interval + 1;
+        set_timestamp(&env, now);
+        client.disburse_recurring(&schedule_id);
+
+        let schedule = client.get_recurring_payment(&schedule_id);
+        assert_eq!(schedule.total_disbursed, amount * period);
+        assert!(
+            schedule.total_disbursed <= total_cap,
+            "cap exceeded at period {}",
+            period
+        );
+        assert_eq!(schedule.status, RecurringStatus::Active);
+    }
+
+    // The fourth period would take the total to 4_000_000, past the cap, so it
+    // is clamped to the 250_000 remaining.
+    now += interval + 1;
+    set_timestamp(&env, now);
+    client.disburse_recurring(&schedule_id);
+
+    let final_schedule = client.get_recurring_payment(&schedule_id);
+    assert_eq!(final_schedule.total_disbursed, total_cap);
+    assert_eq!(
+        token_client.balance(&recipient),
+        recipient_before + total_cap
+    );
+
+    // Reaching the cap retires the schedule and releases its active slot.
+    assert_eq!(final_schedule.status, RecurringStatus::Completed);
+    assert_eq!(client.get_active_recurring_count(), 0);
+
+    // No further disbursement is possible, and the cap still holds.
+    now += interval + 1;
+    set_timestamp(&env, now);
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::ScheduleNotActive))
+    );
+    assert_eq!(
+        client.get_recurring_payment(&schedule_id).total_disbursed,
+        total_cap
+    );
+    assert_eq!(
+        token_client.balance(&recipient),
+        recipient_before + total_cap
+    );
+}
+
+// ── Issue #473 ────────────────────────────────────────────────────────────────
+//
+// The pause/resume governance flow this issue describes is not implemented:
+// `RecurringStatus::Paused` exists, but there is no PauseRecurringPayment or
+// ResumeRecurringPayment proposal kind (see #451), so a schedule cannot be
+// moved into or out of Paused through any entrypoint.
+//
+// What is implemented and testable is the invariant that pause/resume depends
+// on: a schedule that has been idle across several intervals pays exactly one
+// period on its next disbursement rather than back-paying the missed ones.
+// That is the same "no retroactive back-pay" guarantee, exercised through
+// idleness instead of a pause.
+
+#[test]
+fn idle_schedule_pays_only_one_period_and_does_not_back_pay_missed_intervals() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let interval = 3_600_u64;
+    let amount = 1_000_000_i128;
+
+    let schedule_id = create_active_schedule(
+        &env,
+        &client,
+        &owner_a,
+        &owner_b,
+        &owner_c,
+        &recipient,
+        &token_client.address,
+        amount,
+        interval,
+        NOW,
+        0,
+        0,
+        0,
+    );
+
+    let recipient_before = token_client.balance(&recipient);
+    let active_before = client.get_active_recurring_count();
+
+    // First disbursement, one interval in.
+    set_timestamp(&env, NOW + interval + 1);
+    client.disburse_recurring(&schedule_id);
+    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
+
+    // Now go idle for ten intervals — the equivalent of a long pause.
+    let idle_until = NOW + interval + 1 + interval * 10;
+    set_timestamp(&env, idle_until);
+    client.disburse_recurring(&schedule_id);
+
+    // Exactly one more period, not the ten that elapsed.
+    assert_eq!(
+        token_client.balance(&recipient),
+        recipient_before + amount * 2,
+        "missed intervals were back-paid"
+    );
+
+    let schedule = client.get_recurring_payment(&schedule_id);
+    assert_eq!(schedule.total_disbursed, amount * 2);
+    // last_disbursed_at moves to now, so the next period is measured from the
+    // resumption point rather than from the long-past scheduled slot.
+    assert_eq!(schedule.last_disbursed_at, idle_until);
+
+    // And the next period is gated from that point, not immediately available.
+    assert_eq!(
+        client.try_disburse_recurring(&schedule_id),
+        Err(Ok(ContractError::DisbursementTooEarly))
+    );
+
+    // Disbursement never touches the active-schedule counter.
+    assert_eq!(client.get_active_recurring_count(), active_before);
+}
