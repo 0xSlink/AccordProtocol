@@ -40,12 +40,76 @@ jobs:
         run: |
           stellar contract build --release
 
+      - name: Run recurring-payment tests
+        run: cargo test -- recurring -- --nocapture
+
+      - name: Generate wasm-manifest.json
+        run: |
+          python3 <<'PY'
+          import glob
+          import hashlib
+          import json
+          import os
+          import re
+          from datetime import datetime, timezone
+
+          wasm_files = sorted(glob.glob("target/wasm32*/release/*.wasm"))
+          if not wasm_files:
+              raise SystemExit("No WASM files found after contract build")
+
+          # Prefer the Accord contract artifact when multiple WASMs exist.
+          wasm_path = next(
+              (p for p in wasm_files if os.path.basename(p) == "accord.wasm"),
+              wasm_files[0],
+          )
+
+          with open(wasm_path, "rb") as f:
+              wasm_hash = hashlib.sha256(f.read()).hexdigest()
+
+          cargo_toml = open("Cargo.toml", encoding="utf-8").read()
+          match = re.search(
+              r'^soroban-sdk\s*=\s*"=?([^"\n]+)"',
+              cargo_toml,
+              flags=re.MULTILINE,
+          )
+          if not match:
+              raise SystemExit("Could not read soroban-sdk version from Cargo.toml")
+          soroban_sdk_version = match.group(1)
+
+          # Probed: True if contract source includes recurring-payment types/entrypoints
+          try:
+              lib_rs = open("contracts/accord/src/lib.rs", encoding="utf-8").read()
+              supports_recurring_payments = "RecurringPayment" in lib_rs and "disburse_recurring" in lib_rs
+          except FileNotFoundError:
+              supports_recurring_payments = False
+
+          manifest = {
+              "wasm_file": os.path.basename(wasm_path),
+              "wasm_hash": wasm_hash,
+              "commit_sha": os.environ.get("GITHUB_SHA", ""),
+              "build_timestamp": datetime.now(timezone.utc)
+              .replace(microsecond=0)
+              .isoformat()
+              .replace("+00:00", "Z"),
+              "soroban_sdk_version": soroban_sdk_version,
+              "supports_recurring_payments": supports_recurring_payments,
+          }
+
+          with open("wasm-manifest.json", "w", encoding="utf-8") as out:
+              json.dump(manifest, out, indent=2)
+              out.write("\n")
+
+          print(json.dumps(manifest, indent=2))
+          PY
+
       - name: Upload compiled WASM artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: accord-contract-wasm
-          path: target/wasm32-unknown-unknown/release/*.wasm
+          path: |
+            target/wasm32-unknown-unknown/release/*.wasm
+            wasm-manifest.json
           retention-days: 90
 
       - name: Report WASM file sizes

@@ -3,6 +3,7 @@ import type { Proposal, ProposalKind } from "../types/accord";
 import { ApprovalBar } from "./ApprovalBar";
 import { StatusBadge } from "./StatusBadge";
 import { Check, Copy, Link2 } from "lucide-react";
+import { shortenAddr } from "../lib/soroban";
 
 type ProposalCardProps = {
   proposal: Proposal;
@@ -10,6 +11,11 @@ type ProposalCardProps = {
   onApprove: (id: number) => void;
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
+  // weight-based props (new)
+  approvalWeight?: number;
+  quorumWeight?: number;
+  totalWeight?: number;
+  ownerWeights?: Record<string, number>;
 };
 
 const KIND_LABELS = {
@@ -89,6 +95,10 @@ export function ProposalCard({
   onApprove,
   onExecute,
   onRevoke,
+  approvalWeight = 0,
+  quorumWeight = 0,
+  totalWeight = 0,
+  ownerWeights = {},
 }: ProposalCardProps) {
   const connected = !!walletAddress;
   const showApprove = proposal.status === "pending" && !proposal.userHasApproved;
@@ -156,6 +166,27 @@ export function ProposalCard({
               Proposed by -&gt; {proposal.proposer.slice(0, 6)}...
               {proposal.proposer.slice(-4)}
             </p>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
+              {KIND_LABELS[proposal.kind].badge}
+            </span>
+          </div>
+          <KindSummary proposal={proposal} />
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="flex items-center gap-2">
+              <p className="text-zinc-500 text-sm font-mono">
+                Proposed by → {shortenAddr(proposal.proposer)}
+              </p>
+              {(() => {
+                // Find full owner address that matches the shortened proposer string
+                const ownerAddr = Object.keys(ownerWeights).find((a) => shortenAddr(a) === proposal.proposer);
+                if (ownerAddr) {
+                  return (
+                    <span className="text-xs text-zinc-400 ml-1">· weight {ownerWeights[ownerAddr]}</span>
+                  );
+                }
+                return null;
+              })()}
+            </div>
 
             <button
               type="button"
@@ -180,6 +211,12 @@ export function ProposalCard({
               {proposal.description}
             </p>
           )}
+          <Link
+            to={`/proposals/${proposal.id}`}
+            className="mt-2 inline-flex text-xs font-medium text-emerald-400 transition-colors hover:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-zinc-400 rounded"
+          >
+            View details
+          </Link>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -199,6 +236,13 @@ export function ProposalCard({
               <Link2 size={16} />
             )}
           </button>
+          <span
+            role="note"
+            aria-label={`Category: ${proposal.category}`}
+            className={`text-xs px-2 py-0.5 rounded-full font-mono capitalize ${CATEGORY_STYLES[proposal.category]}`}
+          >
+            {proposal.category}
+          </span>
           <StatusBadge status={proposal.status} />
         </div>
       </div>
@@ -272,4 +316,4 @@ export function ProposalCard({
       </div>
     </div>
   );
-}
+});

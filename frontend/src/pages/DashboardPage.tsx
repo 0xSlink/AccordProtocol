@@ -4,6 +4,8 @@ import type { DashboardStat, Owner, Proposal } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import { StatCard } from "../components/StatCard";
 import { ProposalCardSkeleton } from "../components/ProposalCardSkeleton";
+import { useOwnerWeights } from "../hooks/useOwnerWeights";
+import { getRequiredQuorumWeight } from "../lib/contract";
 
 type DashboardPageProps = {
   activeProposals: Proposal[];
@@ -42,6 +44,23 @@ export function DashboardPage({
     if (!sortByDeadline) return right.id - left.id;
     return left.deadlineTs - right.deadlineTs;
   });
+
+  // Compute owner weights and quorum weight for weight-based UI
+  const ownerAddresses = owners.map((o) => o.address);
+  const { weights, totalWeight } = useOwnerWeights(ownerAddresses);
+  const [quorumWeight, setQuorumWeight] = useState<number>(0);
+
+  useEffect(() => {
+    let active = true;
+    getRequiredQuorumWeight()
+      .then((w) => {
+        if (active) setQuorumWeight(w);
+      })
+      .catch(() => {
+        /* noop */
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (readyCount > prevReadyCount.current) {
@@ -104,6 +123,7 @@ export function DashboardPage({
             Expiring first
           </label>
           <button
+            ref={createProposalButtonRef}
             type="button"
             onClick={onCreateProposal}
             className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
@@ -134,16 +154,24 @@ export function DashboardPage({
             <p>Create a new proposal to start the approval flow.</p>
           </div>
         ) : (
-          displayedProposals.map((proposal) => (
-            <ProposalCard
-              key={proposal.id}
-              proposal={proposal}
-              walletAddress={walletAddress}
-              onApprove={onApprove}
-              onExecute={onExecute}
-              onRevoke={onRevoke}
-            />
-          ))
+          displayedProposals.map((proposal) => {
+            // Sum approval weight by summing known owner weights for approver addresses
+            const approvalWeight = (proposal.approverAddresses || []).reduce((acc, addr) => acc + (weights[addr] ?? 0), 0);
+            return (
+              <ProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                walletAddress={walletAddress}
+                onApprove={onApprove}
+                onExecute={onExecute}
+                onRevoke={onRevoke}
+                approvalWeight={approvalWeight}
+                quorumWeight={quorumWeight}
+                totalWeight={totalWeight}
+                ownerWeights={weights}
+              />
+            );
+          })
         )}
       </div>
 
@@ -155,11 +183,11 @@ export function DashboardPage({
               key={owner.address}
               className="flex items-center justify-between px-4 py-3"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-7 h-7 rounded-full bg-zinc-700 flex items-center justify-center text-xs text-zinc-400">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-7 h-7 shrink-0 rounded-full bg-zinc-700 flex items-center justify-center text-xs text-zinc-400">
                   {owner.label[0]}
                 </div>
-                <span className="font-mono text-sm text-zinc-300">
+                <span className="font-mono text-sm text-zinc-300 truncate max-w-[180px] sm:max-w-xs">
                   {owner.address}
                 </span>
               </div>
