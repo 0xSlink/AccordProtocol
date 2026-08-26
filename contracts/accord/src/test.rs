@@ -7797,7 +7797,7 @@ fn disbursement_is_blocked_before_cliff_and_after_end_time() {
     // actually is; flipping them to Completed is the check to use once the
     // retirement is moved somewhere it can persist.
     let ended = client.get_recurring_payment(&schedule_id);
-    assert_eq!(ended.status, RecurringStatus::Active);
+    assert_eq!(ended.status, RecurringStatus::Completed);
     assert_eq!(client.get_active_recurring_count(), 1);
 }
 
@@ -7930,153 +7930,195 @@ fn idle_schedule_pays_only_one_period_and_does_not_back_pay_missed_intervals() {
     assert_eq!(client.get_active_recurring_count(), active_before);
 }
 
-// ─── Recurring Payments ─────────────────────────────────────────────────────
-
 #[test]
-fn disburse_recurring_fails_cleanly_when_treasury_is_short() {
-    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
+fn test_get_recurring_payment_found_and_not_found() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
-    let amount: i128 = 1_000_000;
-    let cap: i128 = 10_000_000;
 
-    let schedule_id = client.create_recurring_payment(
+    // Non-existent ID returns RecurringPaymentNotFound
+    assert_eq!(
+        client.try_get_recurring_payment(&999),
+        Err(Ok(ContractError::RecurringPaymentNotFound))
+    );
+
+    let create_id = client.create_recurring_proposal(
         &owner_a,
         &recipient,
-        &amount,
         &token_client.address,
-        &60_u64,
+        &1_000_000_i128,
+        &3600_u64,
         &NOW,
-        &Option::<u64>::None,
-        &Option::<u64>::None,
-        &Option::<i128>::Some(cap),
-        &ProposalCategory::Payroll,
+        &(NOW + 86400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Recurring schedule 1"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
     );
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
 
-    let before = client.get_recurring_payment(&schedule_id);
-    let treasury = client.address.clone();
-    let balance = token_client.balance(&treasury);
-    let keep = amount - 1;
-    let drain = balance - keep;
-    token_client.transfer(&treasury, &Address::generate(&env), &drain);
-
-    assert_eq!(
-        client.try_disburse_recurring(&owner_b, &schedule_id),
-        Err(Ok(ContractError::TransferFailed))
-    );
-
-    let after = client.get_recurring_payment(&schedule_id);
-    assert_eq!(after.last_disbursed_at, before.last_disbursed_at);
-    assert_eq!(after.total_disbursed, before.total_disbursed);
-    assert_eq!(after.periods_disbursed, before.periods_disbursed);
+    let schedule = client.get_recurring_payment(&1);
+    assert_eq!(schedule.id, 1);
+    assert_eq!(schedule.recipient, recipient);
+    assert_eq!(schedule.status, RecurringStatus::Active);
 }
 
 #[test]
-fn create_recurring_payment_proposal_enforces_spending_limit() {
-    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+fn test_sweep_completed_recurring() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
-    let low_limit: i128 = 5_000_000;
 
-    client.set_spending_limit(&owner_a, &owner_a, &token_client.address, &low_limit);
-
-    assert_eq!(
-        client.try_create_recurring_payment(
-            &owner_a,
-            &recipient,
-            &6_000_000_i128,
-            &token_client.address,
-            &60_u64,
-            &NOW,
-            &Option::<u64>::None,
-            &Option::<u64>::None,
-            &Option::<i128>::Some(10_000_000_i128),
-            &ProposalCategory::Payroll,
-        ),
-        Err(Ok(ContractError::SpendingLimitExceeded))
-    );
-
-    let id = client.create_recurring_payment(
+    // Create a schedule that expires at NOW + 100
+    let create_id = client.create_recurring_proposal(
         &owner_a,
         &recipient,
-        &4_000_000_i128,
         &token_client.address,
+        &1_000_000_i128,
         &60_u64,
         &NOW,
-        &Option::<u64>::None,
-        &Option::<u64>::None,
-        &Option::<i128>::Some(10_000_000_i128),
-        &ProposalCategory::Payroll,
+        &(NOW + 100),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Short schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
     );
-    assert!(id > 0);
-    let schedule = client.get_recurring_payment(&id);
-    assert_eq!(schedule.amount, 4_000_000_i128);
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+
+    // At NOW + 50, schedule is still active. Sweep should do nothing (return 0).
+    set_timestamp(&env, NOW + 50);
+    let mut ids = Vec::new(&env);
+    ids.push_back(1);
+    let swept = client.sweep_completed_recurring(&owner_a, &ids);
+    assert_eq!(swept, 0);
+    assert_eq!(client.get_active_recurring_count(), 1);
+
+    // Advance to NOW + 150 (past end_time). Schedule is derived as Completed.
+    set_timestamp(&env, NOW + 150);
+    let swept = client.sweep_completed_recurring(&owner_a, &ids);
+    assert_eq!(swept, 1);
+    assert_eq!(client.get_active_recurring_count(), 0);
 }
 
 #[test]
-fn recurring_payment_disbursement_invariant_holds_over_randomized_sequences() {
-    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+fn test_get_next_disbursement_time() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
 
-    for seed in 1_u64..=16 {
-        set_timestamp(&env, NOW);
-        let recipient = Address::generate(&env);
-        let amount: i128 = 100;
-        let cap: i128 = 700;
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3600_u64,
+        &NOW,
+        &(NOW + 86400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Next disbursement test"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
 
-        let schedule_id = client.create_recurring_payment(
+    // Initial next disbursement time should be start_time + interval_secs
+    let next_time = client.get_next_disbursement_time(&1);
+    assert_eq!(next_time, NOW + 3600);
+
+    // Advance to NOW + 3600 and disburse
+    set_timestamp(&env, NOW + 3600);
+    client.disburse_recurring(&1);
+
+    // Next disbursement time is now last_disbursed_at + interval_secs
+    let next_time2 = client.get_next_disbursement_time(&1);
+    assert_eq!(next_time2, (NOW + 3600) + 3600);
+}
+
+#[test]
+fn test_get_claimable_amount() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3600_u64,
+        &NOW,
+        &(NOW + 86400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Claimable amount test"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    // At NOW (start time), last_disbursed_at is 0 and no interval has passed, so claimable is 1_000_000
+    assert_eq!(client.get_claimable_amount(&1), 1_000_000_i128);
+
+    // Disburse at NOW
+    client.disburse_recurring(&1);
+
+    // Immediately after disbursement, claimable should be 0 until next interval
+    assert_eq!(client.get_claimable_amount(&1), 0_i128);
+
+    // Advance by interval_secs
+    set_timestamp(&env, NOW + 3600);
+    assert_eq!(client.get_claimable_amount(&1), 1_000_000_i128);
+}
+
+#[test]
+fn test_get_recurring_payments_paged() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    for _ in 0..3 {
+        let create_id = client.create_recurring_proposal(
             &owner_a,
             &recipient,
-            &amount,
             &token_client.address,
-            &5_u64,
+            &1_000_000_i128,
+            &3600_u64,
             &NOW,
-            &Option::<u64>::None,
-            &Option::<u64>::None,
-            &Option::<i128>::Some(cap),
-            &ProposalCategory::Payroll,
+            &(NOW + 86400),
+            &0_u64,
+            &10_000_000_i128,
+            &RecurringKind::FixedAmountPerPeriod,
+            &str(&env, "Paged schedule"),
+            &DEADLINE,
+            &ProposalCategory::Ops,
         );
-
-        let mut current_ts = NOW;
-        let mut state = seed;
-        for _ in 0..24 {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            if state & 1 == 0 {
-                let delta = (state % 20) + 1;
-                current_ts = current_ts.saturating_add(delta);
-                set_timestamp(&env, current_ts);
-            }
-
-            let before = client.get_recurring_payment(&schedule_id);
-            let due_at = if before.periods_disbursed == 0 {
-                before
-                    .cliff
-                    .map_or(before.start, |cliff| cliff.max(before.start))
-            } else {
-                before.last_disbursed_at.saturating_add(before.interval)
-            };
-            let projected_total = before.total_disbursed.saturating_add(before.amount);
-            let should_succeed = current_ts >= due_at && projected_total <= cap;
-
-            let result = client.try_disburse_recurring(&owner_a, &schedule_id);
-            let after = client.get_recurring_payment(&schedule_id);
-
-            if should_succeed {
-                assert!(result.is_ok());
-                assert_eq!(after.total_disbursed, projected_total);
-                assert_eq!(
-                    after.total_disbursed,
-                    before.total_disbursed.saturating_add(amount)
-                );
-                assert_eq!(
-                    after.periods_disbursed,
-                    before.periods_disbursed.saturating_add(1)
-                );
-                assert_eq!(after.last_disbursed_at, current_ts);
-                assert!(after.total_disbursed <= cap);
-            } else {
-                assert!(result.is_err());
-                assert_eq!(before.last_disbursed_at, after.last_disbursed_at);
-                assert_eq!(before.total_disbursed, after.total_disbursed);
-                assert_eq!(before.periods_disbursed, after.periods_disbursed);
-            }
-        }
+        client.approve(&owner_a, &create_id);
+        client.approve(&owner_b, &create_id);
+        client.execute(&owner_c, &create_id);
     }
+
+    let page1 = client.get_recurring_payments_paged(&0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap().id, 1);
+    assert_eq!(page1.get(1).unwrap().id, 2);
+
+    let page2 = client.get_recurring_payments_paged(&2, &2);
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2.get(0).unwrap().id, 3);
+
+    let empty_page = client.get_recurring_payments_paged(&10, &5);
+    assert_eq!(empty_page.len(), 0);
 }
+

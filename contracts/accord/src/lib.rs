@@ -531,6 +531,25 @@ fn write_active_recurring_count(env: &Env, count: u32) {
     bump_instance(env);
 }
 
+fn derive_recurring_status(env: &Env, schedule: &RecurringPayment) -> RecurringStatus {
+    if schedule.status == RecurringStatus::Cancelled {
+        return RecurringStatus::Cancelled;
+    }
+    if schedule.status == RecurringStatus::Paused {
+        return RecurringStatus::Paused;
+    }
+
+    let now = env.ledger().timestamp();
+    let time_completed = schedule.end_time > 0 && now >= schedule.end_time;
+    let cap_completed = schedule.total_cap > 0 && schedule.total_disbursed >= schedule.total_cap;
+
+    if time_completed || cap_completed {
+        return RecurringStatus::Completed;
+    }
+
+    RecurringStatus::Active
+}
+
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
 fn is_initialized(env: &Env) -> bool {
@@ -2795,8 +2814,76 @@ impl AccordContract {
         }
     }
 
+    /// Returns a single recurring payment schedule by ID with a freshly derived status.
     pub fn get_recurring_payment(env: Env, schedule_id: u64) -> Result<RecurringPayment, ContractError> {
-        read_recurring_payment(&env, schedule_id)
+        let mut schedule = read_recurring_payment(&env, schedule_id)?;
+        schedule.status = derive_recurring_status(&env, &schedule);
+        Ok(schedule)
+    }
+
+    /// Returns the ledger timestamp of the next eligible disbursement for a schedule.
+    pub fn get_next_disbursement_time(env: Env, schedule_id: u64) -> Result<u64, ContractError> {
+        let schedule = read_recurring_payment(&env, schedule_id)?;
+        let status = derive_recurring_status(&env, &schedule);
+
+        if matches!(status, RecurringStatus::Completed | RecurringStatus::Cancelled) {
+            return Ok(0);
+        }
+
+        if schedule.last_disbursed_at > 0 {
+            Ok(schedule.last_disbursed_at.saturating_add(schedule.interval_secs))
+        } else {
+            match schedule.kind {
+                RecurringKind::LinearVesting => {
+                    if schedule.cliff_time > 0 {
+                        Ok(schedule.start_time.saturating_add(schedule.cliff_time))
+                    } else {
+                        Ok(schedule.start_time)
+                    }
+                }
+                RecurringKind::FixedAmountPerPeriod => {
+                    if schedule.interval_secs > 0 {
+                        Ok(schedule.start_time.saturating_add(schedule.interval_secs))
+                    } else {
+                        Ok(schedule.start_time)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns a page of recurring schedules with limit capped at 20 and overflow protection.
+    pub fn get_recurring_payments_paged(env: Env, offset: u64, mut limit: u32) -> Vec<RecurringPayment> {
+        if limit > 20 {
+            limit = 20;
+        }
+        let next_id = read_next_recurring_id(&env);
+        let total_schedules = next_id.saturating_sub(1);
+
+        if offset >= total_schedules {
+            return Vec::new(&env);
+        }
+
+        let Some(start) = offset.checked_add(1) else {
+            return Vec::new(&env);
+        };
+        let Some(end) = offset.checked_add(u64::from(limit)) else {
+            return Vec::new(&env);
+        };
+        let end = end.min(total_schedules);
+
+        let mut result = Vec::new(&env);
+        if start > end {
+            return result;
+        }
+
+        for id in start..=end {
+            if let Ok(mut schedule) = read_recurring_payment(&env, id) {
+                schedule.status = derive_recurring_status(&env, &schedule);
+                result.push_back(schedule);
+            }
+        }
+        result
     }
 
     pub fn get_active_recurring_count(env: Env) -> u32 {
