@@ -684,6 +684,209 @@ const frozen = await simulateView("is_frozen"); // boolean
 
 ---
 
+## Recurring Payments
+
+Recurring payments are **proposal-gated schedules**: an owner creates a `CreateRecurringPayment` or `CancelRecurringPayment` proposal via the standard **create → approve → execute** lifecycle (`fix.md:505` lists `create, cancel, disburse` as the implemented entrypoints; `pause / resume / modify` are not separate entrypoints in `contracts/accord/src/lib.rs:2514` — `RecurringStatus::Paused` `lib.rs:35` is reserved and pause/resume/modify are achieved by cancelling and creating a new schedule). Once a `CreateRecurringPayment` proposal is executed, a `RecurringPayment` schedule becomes `Active` and can be disbursed incrementally via the permissionless `disburse_recurring` entrypoint (used by `scripts/keeper-recurring.js`).
+
+### `create_recurring_proposal`
+
+```rust
+fn create_recurring_proposal(
+    env: Env,
+    proposer: Address,
+    recipient: Address,
+    token: Address,
+    amount: i128,
+    interval_secs: u64,
+    start_time: u64,
+    end_time: u64,
+    cliff_time: u64,
+    total_cap: i128,
+    kind: RecurringKind,
+    description: String,
+    deadline: u64,
+    category: ProposalCategory,
+) -> Result<u64, ContractError>
+```
+
+Creates a governance proposal to start a recurring-payment schedule. Like the other governance proposals (`create_add_owner_proposal` etc., `CONTRACT_API.md:334`), it does **not** create the schedule directly — it returns a proposal ID that must be approved and executed; execution creates the `RecurringPayment` (`status = Active`) and emits `r_crt` `RecurringPaymentCreatedEvent`.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `recipient` | `Address` | Must not be the contract address (`InvalidRecipient`). |
+| `token` | `Address` | Must implement Soroban token interface. |
+| `amount` | `i128` | ≥ 1 (`MIN_AMOUNT`, `lib.rs:555`). Per-period amount for `FixedAmountPerPeriod`; ignored (set `0`) for `LinearVesting` where `total_cap` drives the schedule. |
+| `interval_secs` | `u64` | `60` ≤ value ≤ `31536000` (`MIN_INTERVAL_SECS`/`MAX_INTERVAL_SECS`, `lib.rs:589`). |
+| `start_time` | `u64` | Ledger timestamp when disbursements may begin. |
+| `end_time` | `u64` | Ledger timestamp when schedule ends (`0` = no end; for `LinearVesting` must be `> start_time`). |
+| `cliff_time` | `u64` | Earliest disbursement time (`0` = no cliff; if set must be ≥ `start_time`). |
+| `total_cap` | `i128` | Total cap for the schedule (`0` = uncapped for `FixedAmountPerPeriod`; for `LinearVesting` must be `> 0`). |
+| `kind` | `RecurringKind` | `FixedAmountPerPeriod` or `LinearVesting` (`lib.rs:42`). |
+| `description` | `String` | 1–300 characters. |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days (`MAX_PROPOSAL_DURATION`). |
+| `category` | `ProposalCategory` | `Payroll`, `Grant`, `Ops`, etc. Stored in `RecurringPayment.category`. |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent` (proposal creation); on execution `("r_crt",)` → `RecurringPaymentCreatedEvent`.
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `InvalidAmount`, `InvalidInterval`, `InvalidRecipient`, `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`, `TooManyActiveRecurring` (if `active >= 20`, `lib.rs:594`), `ArithmeticError`.
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_recurring_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(recipient, { type: "address" }),
+    nativeToScVal(token, { type: "address" }),
+    nativeToScVal(BigInt(amount), { type: "i128" }),
+    nativeToScVal(BigInt(interval_secs), { type: "u64" }),
+    nativeToScVal(BigInt(start_time), { type: "u64" }),
+    nativeToScVal(BigInt(end_time), { type: "u64" }),
+    nativeToScVal(BigInt(cliff_time), { type: "u64" }),
+    nativeToScVal(BigInt(total_cap), { type: "i128" }),
+    // RecurringKind is a Soroban enum: { FixedAmountPerPeriod: void } or { LinearVesting: void }
+    xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(kind)]), // kind = "FixedAmountPerPeriod" | "LinearVesting"
+    xdr.ScVal.scvString(description),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+    xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(category)]), // category = "Payroll" | "Grant" | ...
+  ),
+  proposerKeypair,
+);
+```
+
+### `create_cancel_recurring_proposal`
+
+```rust
+fn create_cancel_recurring_proposal(
+    env: Env,
+    proposer: Address,
+    schedule_id: u64,
+    description: String,
+    deadline: u64,
+) -> Result<u64, ContractError>
+```
+
+Creates a governance proposal to cancel an existing recurring schedule. The schedule remains `Active` until the cancel proposal is approved and executed, at which point its `status` becomes `Cancelled` and `ACTREC` is decremented, emitting `r_cncl` `RecurringPaymentCancelledEvent`. `pause / resume / modify` are not separate entrypoints — modify is “cancel + new create”, pause/resume uses the `Paused` status variant reserved for future use.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `proposer` | `Address` | Must be an owner. Must authorize. |
+| `schedule_id` | `u64` | Must refer to an existing schedule (`RecurringPaymentNotFound` otherwise). Must not already be `Cancelled`. |
+| `description` | `String` | 1–300 characters. |
+| `deadline` | `u64` | > current ledger timestamp, ≤ now + 90 days. |
+
+**Emits:** `("created",)` → `ProposalCreatedEvent`.
+
+**Errors:** `Unauthorized`, `ContractFrozen`, `RecurringPaymentNotFound` (39), `ScheduleAlreadyCancelled` (45), `EmptyDescription`, `DescriptionTooLong`, `InvalidDeadline`, `InvalidDuration`, `TooManyActiveProposals`.
+
+```js
+await submitOwnerCall(
+  contract.call(
+    "create_cancel_recurring_proposal",
+    nativeToScVal(proposer, { type: "address" }),
+    nativeToScVal(BigInt(schedule_id), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(BigInt(deadline), { type: "u64" }),
+  ),
+  proposerKeypair,
+);
+```
+
+### `disburse_recurring`
+
+```rust
+fn disburse_recurring(env: Env, schedule_id: u64) -> Result<(), ContractError>
+```
+
+Transfers the currently claimable amount from the contract treasury to the schedule’s `recipient`. **Permissionless** — any funded Stellar account may call it (no `require_auth`), enabling the off-chain keeper `scripts/keeper-recurring.js` to automate payouts. The contract must hold sufficient token balance.
+
+Claimable amount logic (`lib.rs:2688`): `FixedAmountPerPeriod` = `amount` (capped by remaining `total_cap`) if `now >= last_disbursed_at + interval_secs`; `LinearVesting` = `vested = total_cap * elapsed / duration - total_disbursed` where `elapsed = min(now - start_time, end_time - start_time)`. On final disbursement or when `now >= end_time`, schedule transitions to `Completed`.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `schedule_id` | `u64` | Must refer to an `Active` schedule. |
+
+**Emits:** `("r_disb",)` → `RecurringPaymentDisbursedEvent` on success.
+
+**Errors:** `ContractFrozen`, `RecurringPaymentNotFound` (39), `ScheduleNotActive` (41), `DisbursementTooEarly` (42), `ScheduleEnded` (43), `ArithmeticError`, `TransferFailed` (via `token.transfer`).
+
+```js
+// Permissionless — any funded account can disburse; no owner auth required.
+import { Contract, TransactionBuilder, nativeToScVal } from "@stellar/stellar-sdk";
+const contract = new Contract(CONTRACT_ID);
+// Keeper pattern (see scripts/keeper-recurring.js):
+const account = await server.getAccount(keeperKeypair.publicKey());
+const tx = new TransactionBuilder(account, { fee: "100000", networkPassphrase })
+  .addOperation(contract.call("disburse_recurring", nativeToScVal(BigInt(schedule_id), { type: "u64" })))
+  .setTimeout(30)
+  .build();
+const prepared = await server.prepareTransaction(tx);
+prepared.sign(keeperKeypair);
+await server.sendTransaction(prepared);
+
+// Or as an owner-authorized call via submitOwnerCall:
+await submitOwnerCall(
+  contract.call("disburse_recurring", nativeToScVal(BigInt(schedule_id), { type: "u64" })),
+  anyKeypair,
+);
+```
+
+### `get_claimable_amount`
+
+```rust
+fn get_claimable_amount(env: Env, schedule_id: u64) -> Result<i128, ContractError>
+```
+
+Read-only view. Returns the amount that would be transferred by `disburse_recurring` at the current ledger timestamp, or `0` if not yet due, not `Active`, or cap exhausted. Mirrors `disburse_recurring` logic without performing the transfer (`lib.rs:2777`).
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `schedule_id` | `u64` | Must refer to an existing schedule. |
+
+**Returns:** `i128` claimable amount in token smallest units.
+
+**Errors:** `RecurringPaymentNotFound` (39).
+
+```js
+// Reuses the read-only simulateView helper defined for get_guardian above.
+const claimable = await simulateView("get_claimable_amount", nativeToScVal(BigInt(schedule_id), { type: "u64" })); // BigInt
+```
+
+### `get_recurring_payment`
+
+```rust
+fn get_recurring_payment(env: Env, schedule_id: u64) -> Result<RecurringPayment, ContractError>
+```
+
+Read-only view. Returns the full `RecurringPayment` struct for a schedule (`lib.rs:2831`).
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `schedule_id` | `u64` | Must refer to an existing schedule. |
+
+**Returns:** `RecurringPayment` (`id, proposer, recipient, token, amount, interval_secs, start_time, end_time, cliff_time, total_cap, total_disbursed, last_disbursed_at, status, kind, category, description`).
+
+**Errors:** `RecurringPaymentNotFound` (39).
+
+```js
+const schedule = await simulateView("get_recurring_payment", nativeToScVal(BigInt(schedule_id), { type: "u64" }));
+// { id, proposer, recipient, token, amount, interval_secs, start_time, end_time, cliff_time, total_cap, total_disbursed, last_disbursed_at, status, kind, category, description }
+```
+
+### `get_active_recurring_count`
+
+```rust
+fn get_active_recurring_count(env: Env) -> u32
+```
+
+Read-only view. Returns the number of schedules currently `Active` (`ACTREC`, `lib.rs:2835`, cap `20` `lib.rs:594`). No auth required.
+
+```js
+const activeCount = await simulateView("get_active_recurring_count"); // Number
+```
+
+---
+
 ## Error Reference
 
 The table below maps every `ContractError` discriminant to its cause and the recommended remediation. All codes are `u32` values encoded as `ScVal::Error` in XDR responses.
@@ -725,6 +928,13 @@ The table below maps every `ContractError` discriminant to its cause and the rec
 | 31 | `SingleOwnerWeightCapExceeded` | A `ChangeOwnerWeight` proposal was rejected because the `new_weight` would give the `target_owner` a share of the resulting total weight greater than the configured maximum (default 50%). | Choose a lower `new_weight` that respects the cap, or have a quorum of owners deliberately raise the cap via `set_max_single_owner_weight_pct`. |
 | 32 | `TargetOwnerNoLongerExists` | A `ChangeOwnerWeight` proposal was executed, but the `target_owner` had been removed from the multisig between proposal creation and execution. | This is an expected guard for an edge case. The proposal has no effect. A new proposal would be needed to change the weight of a current owner. |
 | 33 | `AlreadyMigrated` | `migrate_to_weighted_governance` was called on a contract that already has per-owner weights, either from initialization or a prior migration. The call is rejected to prevent accidental state changes. | Do not call `migrate_to_weighted_governance` again. The contract is already using the weighted governance model. |
+| 39 | `RecurringPaymentNotFound` | No recurring-payment schedule exists for the given `schedule_id` (`RECUR` persistent key missing, `lib.rs:608`). Thrown by `get_recurring_payment`, `get_claimable_amount`, `disburse_recurring`, and `create_cancel_recurring_proposal`. | Verify the ID with `get_active_recurring_count` and `get_recurring_payment`; confirm the schedule was created on the correct contract/network and has not been pruned. |
+| 40 | `InvalidInterval` | The `interval_secs` supplied to `create_recurring_proposal` is outside `[60, 31536000]` (`MIN_INTERVAL_SECS=60` / `MAX_INTERVAL_SECS=31536000`, `lib.rs:589`). | Pass an interval between 1 minute (60s) and 1 year (31536000s). |
+| 41 | `ScheduleNotActive` | `disburse_recurring` was called for a schedule whose `status != Active` (`lib.rs:2664` — `Paused`, `Completed`, or `Cancelled`). Also returned when trying to disburse after cancellation. | Check `get_recurring_payment(...).status` is `Active` before calling `disburse_recurring`; only `Active` schedules are disbursable. |
+| 42 | `DisbursementTooEarly` | The current ledger timestamp is before `start_time`/`cliff_time`, or for `FixedAmountPerPeriod` the interval since `last_disbursed_at` has not elapsed (`lib.rs:2690`), or for `LinearVesting` the vested amount does not exceed `total_disbursed` (`lib.rs:2777`). | Wait until `start_time`/`cliff_time` and `last_disbursed_at + interval_secs` have passed; poll `get_claimable_amount(schedule_id)` until it returns `> 0` before calling `disburse_recurring`. |
+| 43 | `ScheduleEnded` | The schedule has reached `end_time` or its `total_cap` has been fully disbursed (`lib.rs:2678`, `lib.rs:2748`). `disburse_recurring` marks the schedule `Completed` and decrements `ACTREC`. | The schedule is `Completed`; no further disbursements will succeed. Create a new recurring-payment proposal if continued payments are needed. |
+| 44 | `TooManyActiveRecurring` | Creating or executing a `CreateRecurringPayment` proposal would exceed `MAX_ACTIVE_RECURRING=20` (`lib.rs:594`, checked at `lib.rs:2546` and at execution). | Cancel an existing schedule via `create_cancel_recurring_proposal` or let a schedule complete/expire to free a slot, then retry. |
+| 45 | `ScheduleAlreadyCancelled` | `create_cancel_recurring_proposal` was called for a schedule whose `status == Cancelled` (`lib.rs:2613`). | The schedule is already `Cancelled`; no second cancel is needed. Verify with `get_recurring_payment`. |
 
 ---
 
@@ -861,5 +1071,96 @@ struct ProposalExecutedEvent {
     executor: Address,
     to: Address,
     amount: i128,
+}
+```
+
+### `RecurringPaymentCreatedEvent`
+
+Emitted when a `CreateRecurringPayment` proposal is **executed** and a new schedule becomes `Active` (`lib.rs:2415` topic `r_crt`).
+
+**Topics:**
+| Index | Value | XDR Type |
+|-------|-------|----------|
+| 0 | Contract address (implicit) | `ScVal::Address` |
+| 1 | `"r_crt"` | `ScVal::Symbol` |
+
+**Data fields:**
+| Field | Rust Type | XDR SCVal Type | Description |
+|-------|-----------|----------------|-------------|
+| `id` | `u64` | `ScVal::U64` | Schedule ID assigned from `RNEXT` |
+| `proposer` | `Address` | `ScVal::Address` | Owner who proposed the schedule (from `Proposal.proposer`) |
+| `recipient` | `Address` | `ScVal::Address` | Recipient of recurring transfers |
+| `token` | `Address` | `ScVal::Address` | Token contract address |
+| `amount` | `i128` | `ScVal::I128` | Per-period amount (for `FixedAmountPerPeriod`; `0` for `LinearVesting`) |
+| `interval_secs` | `u64` | `ScVal::U64` | Interval between disbursements (60–31536000) |
+| `start_time` | `u64` | `ScVal::U64` | First eligible disbursement timestamp |
+| `end_time` | `u64` | `ScVal::U64` | Schedule end timestamp (`0` = no end) |
+| `cliff_time` | `u64` | `ScVal::U64` | Cliff timestamp (`0` = no cliff) |
+| `total_cap` | `i128` | `ScVal::I128` | Total cap (`0` = uncapped for fixed) |
+| `kind` | `RecurringKind` | `ScVal::Vec` (enum) | `FixedAmountPerPeriod` or `LinearVesting` |
+
+```rust
+struct RecurringPaymentCreatedEvent {
+    id: u64,
+    proposer: Address,
+    recipient: Address,
+    token: Address,
+    amount: i128,
+    interval_secs: u64,
+    start_time: u64,
+    end_time: u64,
+    cliff_time: u64,
+    total_cap: i128,
+    kind: RecurringKind,
+}
+```
+
+### `RecurringPaymentDisbursedEvent`
+
+Emitted on each successful `disburse_recurring` call (`lib.rs:2765` topic `r_disb`).
+
+**Topics:**
+| Index | Value | XDR Type |
+|-------|-------|----------|
+| 0 | Contract address (implicit) | `ScVal::Address` |
+| 1 | `"r_disb"` | `ScVal::Symbol` |
+
+**Data fields:**
+| Field | Rust Type | XDR SCVal Type | Description |
+|-------|-----------|----------------|-------------|
+| `id` | `u64` | `ScVal::U64` | Schedule ID that was disbursed |
+| `recipient` | `Address` | `ScVal::Address` | Recipient that received the transfer |
+| `amount` | `i128` | `ScVal::I128` | Amount transferred in this disbursement (smallest units) |
+| `total_disbursed` | `i128` | `ScVal::I128` | Cumulative total disbursed after this call |
+
+```rust
+struct RecurringPaymentDisbursedEvent {
+    id: u64,
+    recipient: Address,
+    amount: i128,
+    total_disbursed: i128,
+}
+```
+
+### `RecurringPaymentCancelledEvent`
+
+Emitted when a `CancelRecurringPayment` proposal is executed (`lib.rs:2448` topic `r_cncl`).
+
+**Topics:**
+| Index | Value | XDR Type |
+|-------|-------|----------|
+| 0 | Contract address (implicit) | `ScVal::Address` |
+| 1 | `"r_cncl"` | `ScVal::Symbol` |
+
+**Data fields:**
+| Field | Rust Type | XDR SCVal Type | Description |
+|-------|-----------|----------------|-------------|
+| `id` | `u64` | `ScVal::U64` | Schedule ID that was cancelled |
+| `caller` | `Address` | `ScVal::Address` | Executor of the cancel proposal (`executor` at `lib.rs:2451`) |
+
+```rust
+struct RecurringPaymentCancelledEvent {
+    id: u64,
+    caller: Address,
 }
 ```
