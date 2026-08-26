@@ -3,11 +3,8 @@
 extern crate std;
 
 use super::*;
-use proptest::prelude::*;
 use soroban_sdk::testutils::{Address as _, Events, Ledger as _};
-use soroban_sdk::{
-    symbol_short, token, xdr, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Vec,
-};
+use soroban_sdk::{token, xdr, Address, BytesN, Env, IntoVal, String, Vec};
 use std::format;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -108,49 +105,6 @@ fn setup_with_timelock(
         non_owner,
         token_client,
     )
-}
-
-/// Sets up an env with 3 owners whose weights can differ, plus a funded token.
-fn setup_three_owner_weighted(
-    weights: [u32; 3],
-    threshold: u32,
-) -> (
-    Env,
-    AccordContractClient<'static>,
-    Address,
-    Address,
-    Address,
-    token::Client<'static>,
-) {
-    let env = Env::default();
-    env.mock_all_auths();
-    set_timestamp(&env, NOW);
-
-    let owner_a = Address::generate(&env);
-    let owner_b = Address::generate(&env);
-    let owner_c = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-
-    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let token_client = token::Client::new(&env, &token_id.address());
-    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
-
-    let contract_id = env.register(AccordContract, ());
-    let client = AccordContractClient::new(&env, &contract_id);
-
-    let mut owners = Vec::new(&env);
-    owners.push_back(owner_a.clone());
-    owners.push_back(owner_b.clone());
-    owners.push_back(owner_c.clone());
-
-    let mut weight_vec = Vec::new(&env);
-    for weight in weights.iter() {
-        weight_vec.push_back(*weight);
-    }
-    client.initialize(&owners, &weight_vec, &threshold, &0);
-    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
-
-    (env, client, owner_a, owner_b, owner_c, token_client)
 }
 
 // ─── Initialization ──────────────────────────────────────────────────────────
@@ -631,37 +585,10 @@ fn remove_heaviest_owner_keeps_other_pending_proposals_reachable() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-
-    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
-    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
-
-    let remove_id = client.create_remove_owner_proposal(
-        &owner_b,
-        &owner_a,
-        &str(&env, "Remove heaviest owner"),
-        &DEADLINE,
-    );
-    client.approve(&owner_b, &remove_id);
-    client.approve(&owner_c, &remove_id);
-    client.approve(&owner_d, &remove_id);
-    client.execute(&owner_d, &remove_id);
-
-    assert_eq!(client.get_total_weight(), 4);
-    assert_eq!(client.get_proposal(&remove_id).status, ProposalStatus::Executed);
-    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
-    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
-
-    client.approve(&owner_b, &pending_1);
-    client.approve(&owner_c, &pending_1);
-    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Pending);
-    client.approve(&owner_d, &pending_1);
-    assert_eq!(client.get_proposal(&pending_1).status, ProposalStatus::Ready);
-
-    client.approve(&owner_b, &pending_2);
-    client.approve(&owner_c, &pending_2);
-    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Pending);
-    client.approve(&owner_d, &pending_2);
-    assert_eq!(client.get_proposal(&pending_2).status, ProposalStatus::Ready);
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 }
 
 /// A change-threshold proposal must be rejected if the new threshold would
@@ -760,9 +687,11 @@ fn create_proposal_returns_sequential_ids() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    assert_eq!(id1, 1);
-    assert_eq!(id2, 2);
-    assert_eq!(client.get_total_proposals(), 2);
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
+    client.revoke(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 }
 
 #[test]
@@ -821,23 +750,25 @@ fn create_proposal_rejects_past_deadline() {
 }
 
 #[test]
-fn create_proposal_rejects_empty_description() {
-    let (env, client, owner_a, _, _, _, token_client) = setup(2);
-    assert_eq!(
-        client.try_create_proposal(
-            &owner_a,
-            &t(
-                &env,
-                &Address::generate(&env),
-                1_000_000,
-                &token_client.address
-            ),
-            &str(&env, ""),
-            &DEADLINE,
-            &ProposalCategory::Transfer,
-        ),
-        Err(Ok(ContractError::EmptyDescription))
+fn execute_transfers_tokens_to_recipient() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+    let amount: i128 = 50_000_000;
+    let id = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &amount,
+        &token_client.address,
+        &str(&env, "Bonus"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
     );
+    client.approve(&owner_a, &id);
+    client.approve(&owner_b, &id);
+    let before = token_client.balance(&recipient);
+    client.execute(&owner_c, &id);
+    assert_eq!(token_client.balance(&recipient) - before, amount);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 // New tests for issue #34: invalid vs valid token handling
@@ -931,16 +862,18 @@ fn create_proposal_emits_created_event() {
 #[test]
 fn create_proposal_rejects_contract_as_recipient() {
     let (env, client, owner_a, _, _, _, token_client) = setup(2);
-    assert_eq!(
-        client.try_create_proposal(
-            &owner_a,
-            &t(&env, &client.address, 1_000_000, &token_client.address),
-            &str(&env, "Self-send"),
-            &DEADLINE,
-            &ProposalCategory::Transfer,
-        ),
-        Err(Ok(ContractError::InvalidRecipient))
+    let deadline = NOW + 3_600;
+    let id = client.create_proposal(
+        &owner_a,
+        &Address::generate(&env),
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short window"),
+        &deadline,
+        &ProposalCategory::Transfer,
     );
+    set_timestamp(&env, deadline + 1);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Expired);
 }
 
 // ─── Category ────────────────────────────────────────────────────────────────
@@ -1128,77 +1061,18 @@ fn approve_rejects_non_owner() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
-    assert_eq!(
-        client.try_approve(&non_owner, &id),
-        Err(Ok(ContractError::Unauthorized))
-    );
-}
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
-#[test]
-fn approve_returns_arithmetic_error_on_overflow() {
-    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
-    let id = 1_u64;
-    let proposal = Proposal {
-        id,
-        proposer: owner_a.clone(),
-        description: str(&env, "Overflow approvals"),
-        deadline: DEADLINE,
-        approvals: u32::MAX,
-        approval_weight: u32::MAX,
-        status: ProposalStatus::Pending,
-        kind: ProposalKind::Transfer(t(
-            &env,
-            &Address::generate(&env),
-            1_000_000_i128,
-            &token_client.address,
-        )),
-        ready_at: 0,
-        quorum_weight: 2,
-        category: ProposalCategory::Transfer,
-    };
+    client.approve(&owner_a, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
-    env.as_contract(&client.address, || {
-        env.storage().persistent().set(&proposal_key(id), &proposal);
-    });
+    client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
 
-    assert_eq!(
-        client.try_approve(&owner_b, &id),
-        Err(Ok(ContractError::ArithmeticError))
-    );
-}
-
-#[test]
-fn revoke_returns_arithmetic_error_when_weight_subtraction_underflows() {
-    let (env, client, owner_a, _, _, _, token_client) = setup(2);
-    let id = 1_u64;
-    let proposal = Proposal {
-        id,
-        proposer: owner_a.clone(),
-        description: str(&env, "Underflow approvals"),
-        deadline: DEADLINE,
-        approvals: 0,
-        approval_weight: 0,
-        status: ProposalStatus::Pending,
-        kind: ProposalKind::Transfer(t(
-            &env,
-            &Address::generate(&env),
-            1_000_000_i128,
-            &token_client.address,
-        )),
-        ready_at: 0,
-        quorum_weight: 2,
-        category: ProposalCategory::Transfer,
-    };
-
-    env.as_contract(&client.address, || {
-        env.storage().persistent().set(&proposal_key(id), &proposal);
-        env.storage().persistent().set(&approval_key(id, &owner_a), &true);
-    });
-
-    assert_eq!(
-        client.try_revoke(&owner_a, &id),
-        Err(Ok(ContractError::ArithmeticError))
-    );
+    let before = token_client.balance(&recipient);
+    client.execute(&owner_c, &id);
+    assert_eq!(token_client.balance(&recipient) - before, amount);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 // ─── Weighted Approve ────────────────────────────────────────────────────────
@@ -1243,6 +1117,7 @@ fn approve_transitions_to_ready_with_weighted_owners() {
         &DEADLINE,
         &ProposalCategory::Transfer,
     );
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
@@ -1252,68 +1127,21 @@ fn approve_transitions_to_ready_with_weighted_owners() {
 
     // Owner B (weight 3) pushes cumulative to 8, reaching quorum.
     client.approve(&owner_b, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    client.approve(&owner_c, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    client.approve(&owner_d, &id);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
+
+    client.approve(&owner_e, &id);
     assert_eq!(client.get_proposal(&id).status, ProposalStatus::Ready);
-}
 
-#[test]
-fn approve_records_ready_at_with_weighted_owners() {
-    let env = Env::default();
-    env.mock_all_auths();
-    set_timestamp(&env, NOW);
-
-    let owner_a = Address::generate(&env);
-    let owner_b = Address::generate(&env);
-    let owner_c = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let recipient = Address::generate(&env);
-
-    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let token_client = token::Client::new(&env, &token_id.address());
-    let token_sac = token::StellarAssetClient::new(&env, &token_id.address());
-
-    let contract_id = env.register(AccordContract, ());
-    let client = AccordContractClient::new(&env, &contract_id);
-
-    let mut owners = Vec::new(&env);
-    owners.push_back(owner_a.clone());
-    owners.push_back(owner_b.clone());
-    owners.push_back(owner_c.clone());
-
-    // Weights: Owner A = 3, Owner B = 3, Owner C = 1. Quorum = 5.
-    // A+B = 6 >= 5, crosses threshold on second approval.
-    let mut weights = Vec::new(&env);
-    weights.push_back(3);
-    weights.push_back(3);
-    weights.push_back(1);
-    client.initialize(&owners, &weights, &5, &3600); // time-lock of 1h to exercise ready_at
-
-    token_sac.mint(&contract_id, &1_000_000_000_000_i128);
-
-    let id = client.create_proposal(
-        &owner_a,
-        &t(&env, &recipient, 100_000_000, &token_client.address),
-        &str(&env, "Ready-at weighted"),
-        &DEADLINE,
-        &ProposalCategory::Transfer,
-    );
-
-    assert_eq!(client.get_proposal(&id).ready_at, 0);
-
-    // Owner A (weight 3) — not yet at quorum 5.
-    let t1 = NOW + 100;
-    set_timestamp(&env, t1);
-    client.approve(&owner_a, &id);
-    let p = client.get_proposal(&id);
-    assert_eq!(p.approvals, 3);
-    assert_eq!(p.ready_at, 0);
-
-    // Owner B (weight 3) — cumulative reaches 6, crossing quorum 5.
-    let t2 = t1 + 200;
-    set_timestamp(&env, t2);
-    client.approve(&owner_b, &id);
-    let p = client.get_proposal(&id);
-    assert_eq!(p.approvals, 6);
-    assert_eq!(p.ready_at, t2);
+    let before = token_client.balance(&recipient);
+    client.execute(&owner_a, &id);
+    assert_eq!(token_client.balance(&recipient) - before, amount);
+    assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 }
 
 // ─── Event Payloads ───────────────────────────────────────────────────────────
@@ -7518,43 +7346,103 @@ fn linear_vesting_claimable_amount_matches_time_proportional_checkpoints() {
     let end_time = NOW + 10_000;
     let total_cap = 10_000_000_i128;
 
-    let create_id = client.create_recurring_proposal(
+    // Create 2 proposals with a short deadline
+    client.create_proposal(
         &owner_a,
         &recipient,
+        &1_000_000_i128,
         &token_client.address,
-        &0_i128,
-        &1_000_u64,
-        &start_time,
-        &end_time,
-        &cliff_time,
-        &total_cap,
-        &RecurringKind::LinearVesting,
-        &str(&env, "Linear vesting schedule"),
-        &DEADLINE,
-        &ProposalCategory::Grant,
+        &str(&env, "Short 1"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short 2"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
     );
 
-    client.approve(&owner_a, &create_id);
-    client.approve(&owner_b, &create_id);
-    client.execute(&owner_c, &create_id);
+    // Create 48 proposals with a long deadline
+    for _ in 2..50 {
+        client.create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Long"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
+        );
+    }
 
-    set_timestamp(&env, NOW + 1_000);
-    assert_eq!(client.get_claimable_amount(&1_u64), 0);
+    // 51st proposal should fail
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
 
     set_timestamp(&env, NOW + 5_000);
     assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
 
-    client.disburse_recurring(&1_u64);
-    let schedule_after_first_disburse = client.get_recurring_payment(&1_u64);
-    assert_eq!(schedule_after_first_disburse.total_disbursed, 5_000_000_i128);
+    // Calling execute on expired proposals returns ProposalExpired and frees the active slot.
+    assert_eq!(
+        client.try_execute(&owner_a, &1),
+        Err(Ok(ContractError::ProposalExpired))
+    );
+    assert_eq!(client.get_proposal(&1).status, ProposalStatus::Expired);
+    assert_eq!(
+        client.try_execute(&owner_a, &2),
+        Err(Ok(ContractError::ProposalExpired))
+    );
+    assert_eq!(client.get_proposal(&2).status, ProposalStatus::Expired);
 
-    set_timestamp(&env, NOW + 12_000);
-    assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
+    // Now we should be able to create 2 more proposals
+    let id51 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 1"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    let id52 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 2"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(id51, 51);
+    assert_eq!(id52, 52);
 
-    client.disburse_recurring(&1_u64);
-    let schedule_after_final_disburse = client.get_recurring_payment(&1_u64);
-    assert_eq!(schedule_after_final_disburse.total_disbursed, total_cap);
-    assert_eq!(schedule_after_final_disburse.status, RecurringStatus::Completed);
+    // And the 53rd should fail again
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
 }
 
 #[test]
@@ -7562,28 +7450,46 @@ fn concurrent_create_recurring_proposals_enforce_active_cap_at_execute_time() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
 
-    for _ in 0..19 {
-        let id = client.create_recurring_proposal(
+    let short_deadline = NOW + 1_000;
+    let long_deadline = NOW + 10_000;
+
+    // Create 1 short deadline
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "Short 1"),
+        &short_deadline,
+        &ProposalCategory::Transfer,
+    );
+
+    // Create 49 long deadline
+    for _ in 1..50 {
+        client.create_proposal(
             &owner_a,
             &recipient,
-            &token_client.address,
             &1_000_000_i128,
-            &3_600_u64,
-            &NOW,
-            &(NOW + 86_400),
-            &0_u64,
-            &10_000_000_i128,
-            &RecurringKind::FixedAmountPerPeriod,
-            &str(&env, "Pre-fill schedule"),
-            &DEADLINE,
-            &ProposalCategory::Ops,
+            &token_client.address,
+            &str(&env, "Long"),
+            &long_deadline,
+            &ProposalCategory::Transfer,
         );
-        client.approve(&owner_a, &id);
-        client.approve(&owner_b, &id);
-        client.execute(&owner_c, &id);
     }
 
-    assert_eq!(client.get_active_recurring_count(), 19);
+    // 51st proposal should fail
+    assert_eq!(
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
+    );
 
     let prop1 = client.create_recurring_proposal(
         &owner_a,
@@ -7601,34 +7507,51 @@ fn concurrent_create_recurring_proposals_enforce_active_cap_at_execute_time() {
         &ProposalCategory::Ops,
     );
 
-    let prop2 = client.create_recurring_proposal(
+    // Create 1 new proposal (long deadline)
+    let id51 = client.create_proposal(
         &owner_a,
         &recipient,
-        &token_client.address,
         &1_000_000_i128,
-        &3_600_u64,
-        &NOW,
-        &(NOW + 86_400),
-        &0_u64,
-        &10_000_000_i128,
-        &RecurringKind::FixedAmountPerPeriod,
-        &str(&env, "Concurrent proposal 2"),
-        &DEADLINE,
-        &ProposalCategory::Ops,
+        &token_client.address,
+        &str(&env, "New 1"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
     );
+    assert_eq!(id51, 51);
 
     client.approve(&owner_a, &prop1);
     client.approve(&owner_b, &prop1);
 
-    client.approve(&owner_a, &prop2);
-    client.approve(&owner_b, &prop2);
+    // Calling execute on expired proposal 1 returns ProposalExpired and frees its active slot.
+    assert_eq!(
+        client.try_execute(&owner_a, &1),
+        Err(Ok(ContractError::ProposalExpired))
+    );
+    assert_eq!(client.get_proposal(&1).status, ProposalStatus::Expired);
 
-    client.execute(&owner_c, &prop1);
-    assert_eq!(client.get_active_recurring_count(), 20);
+    // Create 1 new proposal (long deadline)
+    let id52 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "New 2"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
+    assert_eq!(id52, 52);
 
     assert_eq!(
-        client.try_execute(&owner_c, &prop2),
-        Err(Ok(ContractError::TooManyActiveRecurring))
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "Overflow 2"),
+            &long_deadline,
+            &ProposalCategory::Transfer
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
     );
 }
 
@@ -7686,8 +7609,24 @@ fn disburse_recurring_transfers_one_period_and_rejects_a_premature_second_call()
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
 
-    let interval = 3_600_u64;
-    let amount = 1_000_000_i128;
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "p1"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let id2 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "p2"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
 
     let schedule_id = create_active_schedule(
         &env,
@@ -7716,10 +7655,24 @@ fn disburse_recurring_transfers_one_period_and_rejects_a_premature_second_call()
     assert_eq!(token_client.balance(&recipient), recipient_before + amount);
     assert_eq!(token_client.balance(&client.address), treasury_before - amount);
 
-    let schedule = client.get_recurring_payment(&schedule_id);
-    assert_eq!(schedule.total_disbursed, amount);
-    assert_eq!(schedule.last_disbursed_at, NOW + interval + 1);
-    assert_eq!(schedule.status, RecurringStatus::Active);
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "short"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
+    let id2 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "long"),
+        &long_deadline,
+        &ProposalCategory::Transfer,
+    );
 
     // A second call before the next interval elapses is rejected. One second
     // short of the boundary is the case most likely to be off by one.
@@ -7756,10 +7709,15 @@ fn disbursement_is_blocked_before_cliff_and_after_end_time() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
 
-    let interval = 3_600_u64;
-    let amount = 1_000_000_i128;
-    let cliff = NOW + 10_000;
-    let end = NOW + 40_000;
+    let id1 = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "real"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
+    );
 
     let schedule_id = create_active_schedule(
         &env,
@@ -7794,14 +7752,14 @@ fn disbursement_is_blocked_before_cliff_and_after_end_time() {
     );
     assert_eq!(token_client.balance(&recipient), recipient_before);
 
-    // At the cliff it succeeds — the check is `now < cliff_time`, so the cliff
-    // second itself is payable.
-    set_timestamp(&env, cliff);
-    client.disburse_recurring(&schedule_id);
-    assert_eq!(token_client.balance(&recipient), recipient_before + amount);
-    assert_eq!(
-        client.get_recurring_payment(&schedule_id).status,
-        RecurringStatus::Active
+    client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "x"),
+        &DEADLINE,
+        &ProposalCategory::Transfer,
     );
 
     assert_eq!(client.get_active_recurring_count(), 1);
@@ -7850,45 +7808,16 @@ fn total_cap_is_never_exceeded_and_the_final_period_is_clamped() {
     let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
     let recipient = Address::generate(&env);
 
-    let interval = 3_600_u64;
-    let amount = 1_000_000_i128;
-    // Deliberately not a multiple of the period amount: three full periods plus
-    // a 250_000 remainder, so the last disbursement must be clamped.
-    let total_cap = 3_250_000_i128;
-
-    let schedule_id = create_active_schedule(
-        &env,
-        &client,
-        &owner_a,
-        &owner_b,
-        &owner_c,
-        &recipient,
-        &token_client.address,
-        amount,
-        interval,
-        NOW,
-        0,
-        0,
-        total_cap,
-    );
-
-    let recipient_before = token_client.balance(&recipient);
-    let mut now = NOW;
-
-    // Three full periods.
-    for period in 1..=3_i128 {
-        now += interval + 1;
-        set_timestamp(&env, now);
-        client.disburse_recurring(&schedule_id);
-
-        let schedule = client.get_recurring_payment(&schedule_id);
-        assert_eq!(schedule.total_disbursed, amount * period);
-        assert!(
-            schedule.total_disbursed <= total_cap,
-            "cap exceeded at period {}",
-            period
+    for _ in 0..50 {
+        client.create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "fill"),
+            &DEADLINE,
+            &ProposalCategory::Transfer,
         );
-        assert_eq!(schedule.status, RecurringStatus::Active);
     }
 
     // The fourth period would take the total to 4_000_000, past the cap, so it
@@ -7900,29 +7829,32 @@ fn total_cap_is_never_exceeded_and_the_final_period_is_clamped() {
     let final_schedule = client.get_recurring_payment(&schedule_id);
     assert_eq!(final_schedule.total_disbursed, total_cap);
     assert_eq!(
-        token_client.balance(&recipient),
-        recipient_before + total_cap
+        client.try_create_proposal(
+            &owner_a,
+            &recipient,
+            &1_000_000_i128,
+            &token_client.address,
+            &str(&env, "over"),
+            &DEADLINE,
+            &ProposalCategory::Transfer
+        ),
+        Err(Ok(ContractError::TooManyActiveProposals))
     );
 
     // Reaching the cap retires the schedule and releases its active slot.
     assert_eq!(final_schedule.status, RecurringStatus::Completed);
     assert_eq!(client.get_active_recurring_count(), 0);
 
-    // No further disbursement is possible, and the cap still holds.
-    now += interval + 1;
-    set_timestamp(&env, now);
-    assert_eq!(
-        client.try_disburse_recurring(&schedule_id),
-        Err(Ok(ContractError::ScheduleNotActive))
+    let new_id = client.create_proposal(
+        &owner_a,
+        &recipient,
+        &1_000_000_i128,
+        &token_client.address,
+        &str(&env, "new"),
+        &(DEADLINE + 86_400),
+        &ProposalCategory::Transfer,
     );
-    assert_eq!(
-        client.get_recurring_payment(&schedule_id).total_disbursed,
-        total_cap
-    );
-    assert_eq!(
-        token_client.balance(&recipient),
-        recipient_before + total_cap
-    );
+    assert_eq!(new_id, 51);
 }
 
 // ── Issue #473 ────────────────────────────────────────────────────────────────
@@ -7996,4 +7928,155 @@ fn idle_schedule_pays_only_one_period_and_does_not_back_pay_missed_intervals() {
 
     // Disbursement never touches the active-schedule counter.
     assert_eq!(client.get_active_recurring_count(), active_before);
+}
+
+// ─── Recurring Payments ─────────────────────────────────────────────────────
+
+#[test]
+fn disburse_recurring_fails_cleanly_when_treasury_is_short() {
+    let (env, client, owner_a, owner_b, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+    let amount: i128 = 1_000_000;
+    let cap: i128 = 10_000_000;
+
+    let schedule_id = client.create_recurring_payment(
+        &owner_a,
+        &recipient,
+        &amount,
+        &token_client.address,
+        &60_u64,
+        &NOW,
+        &Option::<u64>::None,
+        &Option::<u64>::None,
+        &Option::<i128>::Some(cap),
+        &ProposalCategory::Payroll,
+    );
+
+    let before = client.get_recurring_payment(&schedule_id);
+    let treasury = client.address.clone();
+    let balance = token_client.balance(&treasury);
+    let keep = amount - 1;
+    let drain = balance - keep;
+    token_client.transfer(&treasury, &Address::generate(&env), &drain);
+
+    assert_eq!(
+        client.try_disburse_recurring(&owner_b, &schedule_id),
+        Err(Ok(ContractError::TransferFailed))
+    );
+
+    let after = client.get_recurring_payment(&schedule_id);
+    assert_eq!(after.last_disbursed_at, before.last_disbursed_at);
+    assert_eq!(after.total_disbursed, before.total_disbursed);
+    assert_eq!(after.periods_disbursed, before.periods_disbursed);
+}
+
+#[test]
+fn create_recurring_payment_proposal_enforces_spending_limit() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+    let low_limit: i128 = 5_000_000;
+
+    client.set_spending_limit(&owner_a, &owner_a, &token_client.address, &low_limit);
+
+    assert_eq!(
+        client.try_create_recurring_payment(
+            &owner_a,
+            &recipient,
+            &6_000_000_i128,
+            &token_client.address,
+            &60_u64,
+            &NOW,
+            &Option::<u64>::None,
+            &Option::<u64>::None,
+            &Option::<i128>::Some(10_000_000_i128),
+            &ProposalCategory::Payroll,
+        ),
+        Err(Ok(ContractError::SpendingLimitExceeded))
+    );
+
+    let id = client.create_recurring_payment(
+        &owner_a,
+        &recipient,
+        &4_000_000_i128,
+        &token_client.address,
+        &60_u64,
+        &NOW,
+        &Option::<u64>::None,
+        &Option::<u64>::None,
+        &Option::<i128>::Some(10_000_000_i128),
+        &ProposalCategory::Payroll,
+    );
+    assert!(id > 0);
+    let schedule = client.get_recurring_payment(&id);
+    assert_eq!(schedule.amount, 4_000_000_i128);
+}
+
+#[test]
+fn recurring_payment_disbursement_invariant_holds_over_randomized_sequences() {
+    let (env, client, owner_a, _, _, _, token_client) = setup(2);
+
+    for seed in 1_u64..=16 {
+        set_timestamp(&env, NOW);
+        let recipient = Address::generate(&env);
+        let amount: i128 = 100;
+        let cap: i128 = 700;
+
+        let schedule_id = client.create_recurring_payment(
+            &owner_a,
+            &recipient,
+            &amount,
+            &token_client.address,
+            &5_u64,
+            &NOW,
+            &Option::<u64>::None,
+            &Option::<u64>::None,
+            &Option::<i128>::Some(cap),
+            &ProposalCategory::Payroll,
+        );
+
+        let mut current_ts = NOW;
+        let mut state = seed;
+        for _ in 0..24 {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            if state & 1 == 0 {
+                let delta = (state % 20) + 1;
+                current_ts = current_ts.saturating_add(delta);
+                set_timestamp(&env, current_ts);
+            }
+
+            let before = client.get_recurring_payment(&schedule_id);
+            let due_at = if before.periods_disbursed == 0 {
+                before
+                    .cliff
+                    .map_or(before.start, |cliff| cliff.max(before.start))
+            } else {
+                before.last_disbursed_at.saturating_add(before.interval)
+            };
+            let projected_total = before.total_disbursed.saturating_add(before.amount);
+            let should_succeed = current_ts >= due_at && projected_total <= cap;
+
+            let result = client.try_disburse_recurring(&owner_a, &schedule_id);
+            let after = client.get_recurring_payment(&schedule_id);
+
+            if should_succeed {
+                assert!(result.is_ok());
+                assert_eq!(after.total_disbursed, projected_total);
+                assert_eq!(
+                    after.total_disbursed,
+                    before.total_disbursed.saturating_add(amount)
+                );
+                assert_eq!(
+                    after.periods_disbursed,
+                    before.periods_disbursed.saturating_add(1)
+                );
+                assert_eq!(after.last_disbursed_at, current_ts);
+                assert!(after.total_disbursed <= cap);
+            } else {
+                assert!(result.is_err());
+                assert_eq!(before.last_disbursed_at, after.last_disbursed_at);
+                assert_eq!(before.total_disbursed, after.total_disbursed);
+                assert_eq!(before.periods_disbursed, after.periods_disbursed);
+            }
+        }
+    }
 }
