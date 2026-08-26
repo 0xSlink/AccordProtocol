@@ -349,7 +349,136 @@ The execute flow is triggered when an owner clicks Execute on a proposal that ha
 
 > **Most common failure point:** The Accord contract's token balance may be insufficient to cover the transfer amount. The token contract's `transfer` call fails and the execute call reverts with `TransferFailed`. Frontends should check the contract's token balance before enabling the execute button.
 
-## 6. Event Schema
+## 6. Recurring & Scheduled Payments
+
+The contract supports automated, recurring payroll and token vesting schedules via the `CreateRecurringPayment` proposal kind. Once a recurring schedule is proposed and approved by the multisig owners, it is registered on-chain. Payouts are then disbursed incrementally according to the schedule's configuration.
+
+### 6.1 Data Model
+
+Recurring schedules are represented by the `RecurringPayment` struct stored in persistent storage under the `("RECUR", id)` namespace.
+
+```rust
+pub struct RecurringPayment {
+    pub id: u64,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval_secs: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub cliff_time: u64,
+    pub total_cap: i128,
+    pub status: RecurringStatus,
+    pub kind: RecurringKind,
+    pub total_disbursed: i128,
+    pub last_disbursed_at: u64,
+}
+```
+
+#### Status Lifecycle (`RecurringStatus`)
+- **Active**: The schedule is live and eligible for disbursement once temporal constraints (intervals/cliffs) are met.
+- **Paused**: Temporarily paused by a governance proposal; no disbursements can be made.
+- **Completed**: The schedule has naturally concluded because either its `end_time` has passed or the `total_cap` has been fully disbursed.
+- **Cancelled**: Terminated early by a governance proposal (`CancelRecurringPayment`); no further disbursements are possible.
+
+#### Payment Types (`RecurringKind`)
+- **FixedAmountPerPeriod**: Periodic payouts (e.g. salary). Each successful disbursement releases a set `amount` after each `interval_secs`.
+- **LinearVesting**: Continuous second-by-second vesting (e.g. token grants). Claimable amounts accrue continuously between `start_time` and `end_time` up to `total_cap`.
+
+---
+
+### 6.2 The Crank Pattern
+
+Because blockchain smart contracts are passive and cannot run background tasks or triggers on a timer, Accord utilizes the **Crank Pattern** to process disbursements.
+
+- **Crank Execution**: Any external party (such as the recipient, a multisig owner, or an automated bot) must call the public `disburse_recurring(schedule_id)` entrypoint.
+- **Access Control**: This function is unauthenticated (anyone can call it) because the beneficiary and payout parameters are immutable once the schedule is approved.
+- **Automation (Keepers)**: Teams typically deploy an off-chain script (a **Keeper**) that polls `get_claimable_amount(schedule_id)` and automatically submits a "crank" transaction calling `disburse_recurring` when the claimable balance is non-zero.
+
+---
+
+### 6.3 Catch-Up Policy
+
+If a schedule is not cranked immediately when funds become claimable, the protocol handles the delay differently based on the schedule's type:
+
+#### Fixed Amount Per Period (`FixedAmountPerPeriod`)
+- **No Automatic Backpay / Stacking**: The contract enforces that a minimum of `interval_secs` must elapse since `last_disbursed_at`.
+- **Resetting Schedule Timeline**: If multiple intervals are missed (e.g. 3 months on a 1-month interval), the next crank disburse exactly one `amount`. The `last_disbursed_at` is set to `now`, meaning subsequent intervals are measured from the actual execution time. This prevents sudden large token drains from the multisig.
+
+#### Linear Vesting (`LinearVesting`)
+- **True Catch-Up**: The claimable amount is calculated dynamically based on time elapsed since the start. 
+- If a crank is called late, the recipient claims the entire accrued/vested amount up to that second at once, ensuring they are always fully caught up.
+
+---
+
+### 6.4 Linear Vesting Mathematics
+
+For `LinearVesting` schedules, the claimable amount is calculated on-the-fly as:
+
+$$\text{total\_duration} = \text{end\_time} - \text{start\_time}$$
+$$\text{elapsed} = \min(\text{now}, \text{end\_time}) - \text{start\_time}$$
+$$\text{vested} = \frac{\text{total\_cap} \times \text{elapsed}}{\text{total\_duration}}$$
+$$\text{claimable} = \text{vested} - \text{total\_disbursed}$$
+
+The contract uses `u128` arithmetic to prevent multiplication overflow during calculation:
+
+```rust
+let total_duration = schedule.end_time - schedule.start_time;
+let elapsed = if now >= schedule.end_time {
+    total_duration
+} else {
+    now - schedule.start_time
+};
+let vested = (schedule.total_cap as u128)
+    .checked_mul(elapsed as u128)
+    .unwrap_or(0)
+    / (total_duration as u128);
+let claimable = (vested as i128).saturating_sub(schedule.total_disbursed);
+```
+
+---
+
+### 6.5 Full Lifecycle Sequence Diagram
+
+The sequence diagram below illustrates the full lifecycle of a recurring payment schedule, from creation and voting through automated disbursement:
+
+```text
+  Proposer             Owners             Keeper / Bot       Accord Contract      Token Contract
+     |                   |                     |                    |                   |
+     | (1) Propose       |                     |                    |                   |
+     |----create_recurring_payment_proposal------------------------>|                   |
+     |                   |                     |                    |                   |
+     |                   | (2) Approve         |                    |                   |
+     |                   |----approve------------------------------>|                   |
+     |                   |                     |                    |                   |
+     |                   | (3) Execute         |                    |                   |
+     |                   |----execute------------------------------>|                   |
+     |                   |                     |                    |                   |
+     |                   |                     |                    |--[Status=Active]  |
+     |                   |                     |                    |                   |
+     |                   |                     | (4) Poll           |                   |
+     |                   |                     |----get_claimable-->|                   |
+     |                   |                     |    _amount()       |                   |
+     |                   |                     |<---returns > 0-----|                   |
+     |                   |                     |                    |                   |
+     |                   |                     | (5) Crank          |                   |
+     |                   |                     |----disburse_       |                   |
+     |                   |                     |    recurring()---->|                   |
+     |                   |                     |                    |--[Verify Cliff]   |
+     |                   |                     |                    |--[Calculate Amt]  |
+     |                   |                     |                    |                   |
+     |                   |                     |                    | (6) transfer()    |
+     |                   |                     |                    |------------------>|
+     |                   |                     |                    |<--[Transfer OK]---|
+     |                   |                     |                    |                   |
+     |                   |                     |                    |--[Update State]   |
+     |                   |                     |                    |--[Emit Event]     |
+     |                   |                     |<---disbursed-------|                   |
+```
+
+---
+
+## 7. Event Schema
 
 The contract emits events using `env.events().publish()`. Each Soroban event has two components that external consumers must understand:
 
@@ -404,14 +533,14 @@ For long-term event history, use one of the following:
 
 See issue #103 and the TTL documentation in Section 3 for context on how on-chain data persistence works more broadly.
 
-## 7. Frontend Polling Strategy
+## 8. Frontend Polling Strategy
 
 1. Load current proposals on mount, then poll every 15-30s for active proposals.
 2. After a confirmed transaction (approve, execute), re-fetch the affected proposal immediately for optimistic UI.
 3. Deduplicate events by `(ledger, topic, data-hash)`.
 4. Back off on RPC failure: 1s → 2s → 4s, cap at 30s.
 
-## 8. Token Handling
+## 9. Token Handling
 
 All token amounts are stored and transferred in the token's **smallest unit** (stroops for XLM: 1 stroop = 0.0000001 XLM). Use `BigInt` in the frontend — never `Number` for on-chain amounts.
 
@@ -425,7 +554,7 @@ Frontend utilities should live in `frontend/src/lib/soroban.ts`:
 - `toBaseUnit(amount: string, decimals: number): bigint`
 - `fromBaseUnit(amount: bigint, decimals: number): string`
 
-## 9. Token Deposit Flow
+## 10. Token Deposit Flow
 
 The Accord contract does not automatically pull tokens from owner wallets. It only holds whatever tokens have been sent directly to its own contract address — and only discovers a shortfall when execution is attempted.
 
@@ -460,7 +589,7 @@ The Settings page (`frontend/src/pages/SettingsPage.tsx`) includes a **"Fund Con
 
 The same panel also serves as a diagnostic tool: if an execute call fails with `TransferFailed`, an owner can check this panel to confirm the balance is sufficient before retrying.
 
-## 10. Related Documents
+## 11. Related Documents
 
 | Document                                                                  | Description                                                    |
 | ------------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -470,7 +599,7 @@ The same panel also serves as a diagnostic tool: if an execute call fails with `
 | [CONTRACT_API.md](CONTRACT_API.md)                                        | Full contract function reference                               |
 | [SETUP.md](SETUP.md)                                                      | Developer setup and deployment instructions                    |
 
-## 11. Owner-Authorization Check Resource Cost
+## 12. Owner-Authorization Check Resource Cost
 
 Every authorized call into the contract (`approve`, `revoke`, `execute`, and each governance proposal creation) loads the entire `OWNERS` persistent entry (an `Address → u32` weight map) and looks up the caller's weight. This section measures the CPU instruction and memory cost of that check at the maximum owner count (`MAX_OWNERS = 20`) compared to a single-owner baseline.
 
