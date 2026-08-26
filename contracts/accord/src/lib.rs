@@ -1,6 +1,7 @@
 #![no_std]
 #![allow(deprecated)]
 pub mod validate;
+use validate::{validate_deadline, validate_description};
 
 use soroban_sdk::{Map, 
     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
@@ -29,6 +30,57 @@ pub struct Transfer {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
+pub enum RecurringStatus {
+    Active,
+    Paused,
+    Completed,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum RecurringKind {
+    FixedAmountPerPeriod,
+    LinearVesting,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPayment {
+    pub id: u64,
+    pub proposer: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval_secs: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub cliff_time: u64,
+    pub total_cap: i128,
+    pub total_disbursed: i128,
+    pub last_disbursed_at: u64,
+    pub status: RecurringStatus,
+    pub kind: RecurringKind,
+    pub category: ProposalCategory,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct CreateRecurringParams {
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval_secs: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub cliff_time: u64,
+    pub total_cap: i128,
+    pub kind: RecurringKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
 pub enum ProposalKind {
     /// Transfer(transfers)
     Transfer(Vec<Transfer>),
@@ -45,6 +97,10 @@ pub enum ProposalKind {
     /// voting weight. Zero is never valid: remove an owner instead of leaving a
     /// listed owner unable to participate in governance.
     ChangeOwnerWeight(Address, u32),
+    /// CreateRecurringPayment
+    CreateRecurringPayment(CreateRecurringParams),
+    /// CancelRecurringPayment(schedule_id)
+    CancelRecurringPayment(u64),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,7 +176,7 @@ pub struct Delegation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct DelegationInfo {
-    pub outgoing: Option<Delegation>,
+    pub outgoing: Vec<Delegation>,
     pub incoming: Vec<Delegation>,
 }
 
@@ -261,6 +317,38 @@ pub struct DelegationRevokedEvent {
     pub weight: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPaymentCreatedEvent {
+    pub id: u64,
+    pub proposer: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval_secs: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub cliff_time: u64,
+    pub total_cap: i128,
+    pub kind: RecurringKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPaymentDisbursedEvent {
+    pub id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+    pub total_disbursed: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecurringPaymentCancelledEvent {
+    pub id: u64,
+    pub caller: Address,
+}
+
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -310,6 +398,13 @@ pub enum ContractError {
     InvalidExpiry = 37,
     /// No outgoing delegation exists for this owner.
     DelegationNotFound = 38,
+    RecurringPaymentNotFound = 39,
+    InvalidInterval = 40,
+    ScheduleNotActive = 41,
+    DisbursementTooEarly = 42,
+    ScheduleEnded = 43,
+    TooManyActiveRecurring = 44,
+    ScheduleAlreadyCancelled = 45,
 }
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
@@ -490,6 +585,69 @@ const DEFAULT_MAX_SINGLE_OWNER_WEIGHT_PCT: u32 = MAX_SINGLE_OWNER_WEIGHT_PCT;
 /// "available limit" view depend on the exact time of each prior transaction, producing
 /// non-deterministic behavior across nodes executing the same transaction sequence.
 const SPENDING_WINDOW: u64 = 2_592_000;
+
+/// Minimum interval for recurring payments: 1 minute (60s).
+const MIN_INTERVAL_SECS: u64 = 60;
+/// Maximum interval for recurring payments: 1 year (31,536,000s).
+const MAX_INTERVAL_SECS: u64 = 31_536_000;
+/// Maximum concurrent active recurring schedules.
+const MAX_ACTIVE_RECURRING: u32 = 20;
+
+fn recur_key(id: u64) -> (Symbol, u64) {
+    (symbol_short!("RECUR"), id)
+}
+
+fn recur_next_id_key() -> Symbol {
+    symbol_short!("RNEXT")
+}
+
+fn active_recur_count_key() -> Symbol {
+    symbol_short!("ACTREC")
+}
+
+fn read_recurring_payment(env: &Env, id: u64) -> Result<RecurringPayment, ContractError> {
+    let key = recur_key(id);
+    let schedule: RecurringPayment = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContractError::RecurringPaymentNotFound)?;
+    bump_persistent(env, &key);
+    Ok(schedule)
+}
+
+fn write_recurring_payment(env: &Env, schedule: &RecurringPayment) {
+    let key = recur_key(schedule.id);
+    env.storage().persistent().set(&key, schedule);
+    bump_persistent(env, &key);
+}
+
+fn read_next_recurring_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&recur_next_id_key())
+        .unwrap_or(1_u64);
+    bump_instance(env);
+    id
+}
+
+fn write_next_recurring_id(env: &Env, id: u64) {
+    env.storage().instance().set(&recur_next_id_key(), &id);
+    bump_instance(env);
+}
+
+fn read_active_recurring_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&active_recur_count_key())
+        .unwrap_or(0)
+}
+
+fn write_active_recurring_count(env: &Env, count: u32) {
+    env.storage().instance().set(&active_recur_count_key(), &count);
+    bump_instance(env);
+}
 
 // ─── Storage Helpers ─────────────────────────────────────────────────────────
 
@@ -2222,6 +2380,78 @@ impl AccordContract {
                     },
                 );
             }
+            ProposalKind::CreateRecurringPayment(params) => {
+                let active = read_active_recurring_count(&env);
+                if active >= MAX_ACTIVE_RECURRING {
+                    return Err(ContractError::TooManyActiveRecurring);
+                }
+
+                let id = read_next_recurring_id(&env);
+                write_next_recurring_id(&env, id + 1);
+
+                let schedule = RecurringPayment {
+                    id,
+                    proposer: proposal.proposer.clone(),
+                    recipient: params.recipient.clone(),
+                    token: params.token.clone(),
+                    amount: params.amount,
+                    interval_secs: params.interval_secs,
+                    start_time: params.start_time,
+                    end_time: params.end_time,
+                    cliff_time: params.cliff_time,
+                    total_cap: params.total_cap,
+                    total_disbursed: 0,
+                    last_disbursed_at: 0,
+                    status: RecurringStatus::Active,
+                    kind: params.kind.clone(),
+                    category: proposal.category.clone(),
+                    description: proposal.description.clone(),
+                };
+
+                write_recurring_payment(&env, &schedule);
+                write_active_recurring_count(&env, active + 1);
+
+                env.events().publish(
+                    (symbol_short!("r_crt"),),
+                    RecurringPaymentCreatedEvent {
+                        id,
+                        proposer: proposal.proposer.clone(),
+                        recipient: params.recipient.clone(),
+                        token: params.token.clone(),
+                        amount: params.amount,
+                        interval_secs: params.interval_secs,
+                        start_time: params.start_time,
+                        end_time: params.end_time,
+                        cliff_time: params.cliff_time,
+                        total_cap: params.total_cap,
+                        kind: params.kind.clone(),
+                    },
+                );
+            }
+            ProposalKind::CancelRecurringPayment(schedule_id) => {
+                let mut schedule = read_recurring_payment(&env, *schedule_id)?;
+                if schedule.status == RecurringStatus::Cancelled {
+                    return Err(ContractError::ScheduleAlreadyCancelled);
+                }
+
+                if schedule.status == RecurringStatus::Active || schedule.status == RecurringStatus::Paused {
+                    let active = read_active_recurring_count(&env);
+                    if active > 0 {
+                        write_active_recurring_count(&env, active - 1);
+                    }
+                }
+
+                schedule.status = RecurringStatus::Cancelled;
+                write_recurring_payment(&env, &schedule);
+
+                env.events().publish(
+                    (symbol_short!("r_cncl"),),
+                    RecurringPaymentCancelledEvent {
+                        id: *schedule_id,
+                        caller: executor.clone(),
+                    },
+                );
+            }
         }
 
         proposal.status = ProposalStatus::Executed;
@@ -2277,6 +2507,333 @@ impl AccordContract {
         }
 
         Ok(swept)
+    }
+
+    // ─── Recurring Payments ──────────────────────────────────────────────────
+
+    pub fn create_recurring_proposal(
+        env: Env,
+        proposer: Address,
+        recipient: Address,
+        token: Address,
+        amount: i128,
+        interval_secs: u64,
+        start_time: u64,
+        end_time: u64,
+        cliff_time: u64,
+        total_cap: i128,
+        kind: RecurringKind,
+        description: String,
+        deadline: u64,
+        category: ProposalCategory,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner_and_weight(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        if amount < MIN_AMOUNT {
+            return Err(ContractError::InvalidAmount);
+        }
+        if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&interval_secs) {
+            return Err(ContractError::InvalidInterval);
+        }
+        if recipient == env.current_contract_address() {
+            return Err(ContractError::InvalidRecipient);
+        }
+        validate_description(&description)?;
+        validate_deadline(&env, deadline)?;
+
+        if read_active_recurring_count(&env) >= MAX_ACTIVE_RECURRING {
+            return Err(ContractError::TooManyActiveRecurring);
+        }
+
+        let threshold = read_threshold(&env)?;
+        let id = read_next_id(&env);
+
+        let p_kind = ProposalKind::CreateRecurringPayment(CreateRecurringParams {
+            recipient,
+            token,
+            amount,
+            interval_secs,
+            start_time,
+            end_time,
+            cliff_time,
+            total_cap,
+            kind,
+        });
+
+        let proposal = Proposal {
+            id,
+            proposer: proposer.clone(),
+            description,
+            deadline,
+            approvals: 0,
+            approval_weight: 0,
+            status: ProposalStatus::Pending,
+            kind: p_kind,
+            ready_at: 0,
+            quorum_weight: threshold,
+            category: category.clone(),
+        };
+        write_proposal(&env, &proposal);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
+
+        let total_weight = read_total_weight(&env);
+        env.events().publish(
+            (symbol_short!("created"),),
+            ProposalCreatedEvent {
+                id,
+                proposer,
+                threshold,
+                category,
+                transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
+            },
+        );
+
+        Ok(id)
+    }
+
+    pub fn create_cancel_recurring_proposal(
+        env: Env,
+        proposer: Address,
+        schedule_id: u64,
+        description: String,
+        deadline: u64,
+    ) -> Result<u64, ContractError> {
+        proposer.require_auth();
+        require_owner_and_weight(&env, &proposer)?;
+        require_not_frozen(&env)?;
+
+        let schedule = read_recurring_payment(&env, schedule_id)?;
+        if schedule.status == RecurringStatus::Cancelled {
+            return Err(ContractError::ScheduleAlreadyCancelled);
+        }
+
+        validate_description(&description)?;
+        validate_deadline(&env, deadline)?;
+
+        let threshold = read_threshold(&env)?;
+        let id = read_next_id(&env);
+
+        let p_kind = ProposalKind::CancelRecurringPayment(schedule_id);
+
+        let proposal = Proposal {
+            id,
+            proposer: proposer.clone(),
+            description,
+            deadline,
+            approvals: 0,
+            approval_weight: 0,
+            status: ProposalStatus::Pending,
+            kind: p_kind,
+            ready_at: 0,
+            quorum_weight: threshold,
+            category: ProposalCategory::Ops,
+        };
+        write_proposal(&env, &proposal);
+        register_active_proposal(&env, id)?;
+
+        let next_id = id.checked_add(1).ok_or(ContractError::ArithmeticError)?;
+        write_next_id(&env, next_id);
+
+        let total_weight = read_total_weight(&env);
+        env.events().publish(
+            (symbol_short!("created"),),
+            ProposalCreatedEvent {
+                id,
+                proposer,
+                threshold,
+                category: ProposalCategory::Ops,
+                transfers: Vec::new(&env),
+                quorum_weight: threshold,
+                total_weight_at_creation: total_weight,
+            },
+        );
+
+        Ok(id)
+    }
+
+    pub fn disburse_recurring(env: Env, schedule_id: u64) -> Result<(), ContractError> {
+        require_not_frozen(&env)?;
+
+        let mut schedule = read_recurring_payment(&env, schedule_id)?;
+        if schedule.status != RecurringStatus::Active {
+            return Err(ContractError::ScheduleNotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < schedule.start_time {
+            return Err(ContractError::DisbursementTooEarly);
+        }
+
+        if schedule.cliff_time > 0 && now < schedule.cliff_time {
+            return Err(ContractError::DisbursementTooEarly);
+        }
+
+        if schedule.end_time > 0 && now >= schedule.end_time {
+            schedule.status = RecurringStatus::Completed;
+            let active = read_active_recurring_count(&env);
+            if active > 0 {
+                write_active_recurring_count(&env, active - 1);
+            }
+            write_recurring_payment(&env, &schedule);
+            return Err(ContractError::ScheduleEnded);
+        }
+
+        let claimable = match schedule.kind {
+            RecurringKind::FixedAmountPerPeriod => {
+                if schedule.last_disbursed_at > 0 && now < schedule.last_disbursed_at.saturating_add(schedule.interval_secs) {
+                    return Err(ContractError::DisbursementTooEarly);
+                }
+                let mut amt = schedule.amount;
+                if schedule.total_cap > 0 {
+                    let remaining = schedule.total_cap.saturating_sub(schedule.total_disbursed);
+                    if remaining <= 0 {
+                        schedule.status = RecurringStatus::Completed;
+                        let active = read_active_recurring_count(&env);
+                        if active > 0 {
+                            write_active_recurring_count(&env, active - 1);
+                        }
+                        write_recurring_payment(&env, &schedule);
+                        return Err(ContractError::ScheduleEnded);
+                    }
+                    if amt > remaining {
+                        amt = remaining;
+                    }
+                }
+                amt
+            }
+            RecurringKind::LinearVesting => {
+                if schedule.end_time <= schedule.start_time || schedule.total_cap <= 0 {
+                    return Err(ContractError::ArithmeticError);
+                }
+                let total_duration = schedule.end_time - schedule.start_time;
+                let elapsed = if now >= schedule.end_time {
+                    total_duration
+                } else {
+                    now - schedule.start_time
+                };
+                let vested = (schedule.total_cap as u128)
+                    .checked_mul(elapsed as u128)
+                    .unwrap_or(0)
+                    / (total_duration as u128);
+                let vested = vested as i128;
+                let claimable = vested.saturating_sub(schedule.total_disbursed);
+                if claimable <= 0 {
+                    return Err(ContractError::DisbursementTooEarly);
+                }
+                claimable
+            }
+        };
+
+        if claimable <= 0 {
+            return Err(ContractError::DisbursementTooEarly);
+        }
+
+        let token_client = token::Client::new(&env, &schedule.token);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &schedule.recipient,
+            &claimable,
+        );
+
+        schedule.total_disbursed = schedule.total_disbursed.saturating_add(claimable);
+        schedule.last_disbursed_at = now;
+
+        if schedule.total_cap > 0 && schedule.total_disbursed >= schedule.total_cap {
+            schedule.status = RecurringStatus::Completed;
+            let active = read_active_recurring_count(&env);
+            if active > 0 {
+                write_active_recurring_count(&env, active - 1);
+            }
+        } else if schedule.end_time > 0 && now >= schedule.end_time {
+            schedule.status = RecurringStatus::Completed;
+            let active = read_active_recurring_count(&env);
+            if active > 0 {
+                write_active_recurring_count(&env, active - 1);
+            }
+        }
+
+        write_recurring_payment(&env, &schedule);
+
+        env.events().publish(
+            (symbol_short!("r_disb"),),
+            RecurringPaymentDisbursedEvent {
+                id: schedule.id,
+                recipient: schedule.recipient.clone(),
+                amount: claimable,
+                total_disbursed: schedule.total_disbursed,
+            },
+        );
+
+        Ok(())
+    }
+
+    pub fn get_claimable_amount(env: Env, schedule_id: u64) -> Result<i128, ContractError> {
+        let schedule = read_recurring_payment(&env, schedule_id)?;
+        if schedule.status != RecurringStatus::Active {
+            return Ok(0);
+        }
+        let now = env.ledger().timestamp();
+        if now < schedule.start_time {
+            return Ok(0);
+        }
+        if schedule.cliff_time > 0 && now < schedule.cliff_time {
+            return Ok(0);
+        }
+
+        match schedule.kind {
+            RecurringKind::FixedAmountPerPeriod => {
+                if schedule.last_disbursed_at > 0 && now < schedule.last_disbursed_at.saturating_add(schedule.interval_secs) {
+                    return Ok(0);
+                }
+                let mut amt = schedule.amount;
+                if schedule.total_cap > 0 {
+                    let remaining = schedule.total_cap.saturating_sub(schedule.total_disbursed);
+                    if remaining <= 0 {
+                        return Ok(0);
+                    }
+                    if amt > remaining {
+                        amt = remaining;
+                    }
+                }
+                Ok(amt)
+            }
+            RecurringKind::LinearVesting => {
+                if schedule.end_time <= schedule.start_time || schedule.total_cap <= 0 {
+                    return Ok(0);
+                }
+                let total_duration = schedule.end_time - schedule.start_time;
+                let elapsed = if now >= schedule.end_time {
+                    total_duration
+                } else {
+                    now - schedule.start_time
+                };
+                let vested = (schedule.total_cap as u128)
+                    .checked_mul(elapsed as u128)
+                    .unwrap_or(0)
+                    / (total_duration as u128);
+                let vested = vested as i128;
+                let claimable = vested.saturating_sub(schedule.total_disbursed);
+                if claimable <= 0 {
+                    return Ok(0);
+                }
+                Ok(claimable)
+            }
+        }
+    }
+
+    pub fn get_recurring_payment(env: Env, schedule_id: u64) -> Result<RecurringPayment, ContractError> {
+        read_recurring_payment(&env, schedule_id)
+    }
+
+    pub fn get_active_recurring_count(env: Env) -> u32 {
+        read_active_recurring_count(&env)
     }
 
     // ─── Read-Only Queries ───────────────────────────────────────────────────
@@ -2344,7 +2901,10 @@ impl AccordContract {
     /// alongside every delegation currently received from other owners.
     pub fn get_delegations(env: Env, owner: Address) -> Result<DelegationInfo, ContractError> {
         let owners = read_owners_map(&env)?;
-        let outgoing = read_delegation(&env, &owner);
+        let mut outgoing_vec = Vec::new(&env);
+        if let Some(d) = read_delegation(&env, &owner) {
+            outgoing_vec.push_back(d);
+        }
 
         let mut incoming = Vec::new(&env);
         for other in owners.keys().iter() {
@@ -2358,7 +2918,10 @@ impl AccordContract {
             }
         }
 
-        Ok(DelegationInfo { outgoing, incoming })
+        Ok(DelegationInfo {
+            outgoing: outgoing_vec,
+            incoming,
+        })
     }
 
     /// Returns every current owner's outgoing delegation that has not yet expired.

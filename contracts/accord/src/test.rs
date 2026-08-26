@@ -7387,3 +7387,247 @@ fn benchmark_approve_cost_20_owners() {
         mem_approve
     );
 }
+
+// ─── Recurring Payment Tests ──────────────────────────────────────────────────
+
+#[test]
+fn cancelling_recurring_payment_is_terminal_decrements_active_and_blocks_disbursement() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Recurring payment schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+    let schedule = client.get_recurring_payment(&1);
+    assert_eq!(schedule.status, RecurringStatus::Active);
+
+    let cancel_id = client.create_cancel_recurring_proposal(
+        &owner_a,
+        &1_u64,
+        &str(&env, "Cancel recurring schedule"),
+        &DEADLINE,
+    );
+
+    client.approve(&owner_a, &cancel_id);
+    client.approve(&owner_b, &cancel_id);
+    client.execute(&owner_c, &cancel_id);
+
+    assert_eq!(client.get_active_recurring_count(), 0);
+
+    let cancelled_schedule = client.get_recurring_payment(&1);
+    assert_eq!(cancelled_schedule.status, RecurringStatus::Cancelled);
+
+    assert_eq!(
+        client.try_disburse_recurring(&1_u64),
+        Err(Ok(ContractError::ScheduleNotActive))
+    );
+
+    assert_eq!(
+        client.try_create_cancel_recurring_proposal(
+            &owner_a,
+            &1_u64,
+            &str(&env, "Second cancel attempt"),
+            &DEADLINE,
+        ),
+        Err(Ok(ContractError::ScheduleAlreadyCancelled))
+    );
+}
+
+#[test]
+fn frozen_contract_blocks_recurring_disbursement_and_unfreezing_restores_it() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let guardian = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let mut approvers = Vec::new(&env);
+    approvers.push_back(owner_a.clone());
+    approvers.push_back(owner_b.clone());
+    client.set_guardian(&approvers, &guardian);
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Recurring payment schedule"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    assert_eq!(client.get_active_recurring_count(), 1);
+
+    client.freeze(&guardian);
+    assert!(client.is_frozen());
+
+    set_timestamp(&env, NOW + 3_600);
+
+    assert_eq!(
+        client.try_disburse_recurring(&1_u64),
+        Err(Ok(ContractError::ContractFrozen))
+    );
+
+    let schedule_after_frozen_attempt = client.get_recurring_payment(&1);
+    assert_eq!(schedule_after_frozen_attempt.last_disbursed_at, 0);
+    assert_eq!(schedule_after_frozen_attempt.total_disbursed, 0);
+
+    client.unfreeze(&approvers);
+    assert!(!client.is_frozen());
+
+    client.disburse_recurring(&1_u64);
+
+    let schedule_after_unfreeze = client.get_recurring_payment(&1);
+    assert_eq!(schedule_after_unfreeze.last_disbursed_at, NOW + 3_600);
+    assert_eq!(schedule_after_unfreeze.total_disbursed, 1_000_000_i128);
+}
+
+#[test]
+fn linear_vesting_claimable_amount_matches_time_proportional_checkpoints() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    let start_time = NOW;
+    let cliff_time = NOW + 2_000;
+    let end_time = NOW + 10_000;
+    let total_cap = 10_000_000_i128;
+
+    let create_id = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &0_i128,
+        &1_000_u64,
+        &start_time,
+        &end_time,
+        &cliff_time,
+        &total_cap,
+        &RecurringKind::LinearVesting,
+        &str(&env, "Linear vesting schedule"),
+        &DEADLINE,
+        &ProposalCategory::Grant,
+    );
+
+    client.approve(&owner_a, &create_id);
+    client.approve(&owner_b, &create_id);
+    client.execute(&owner_c, &create_id);
+
+    set_timestamp(&env, NOW + 1_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 0);
+
+    set_timestamp(&env, NOW + 5_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
+
+    client.disburse_recurring(&1_u64);
+    let schedule_after_first_disburse = client.get_recurring_payment(&1_u64);
+    assert_eq!(schedule_after_first_disburse.total_disbursed, 5_000_000_i128);
+
+    set_timestamp(&env, NOW + 12_000);
+    assert_eq!(client.get_claimable_amount(&1_u64), 5_000_000_i128);
+
+    client.disburse_recurring(&1_u64);
+    let schedule_after_final_disburse = client.get_recurring_payment(&1_u64);
+    assert_eq!(schedule_after_final_disburse.total_disbursed, total_cap);
+    assert_eq!(schedule_after_final_disburse.status, RecurringStatus::Completed);
+}
+
+#[test]
+fn concurrent_create_recurring_proposals_enforce_active_cap_at_execute_time() {
+    let (env, client, owner_a, owner_b, owner_c, _, token_client) = setup(2);
+    let recipient = Address::generate(&env);
+
+    for _ in 0..19 {
+        let id = client.create_recurring_proposal(
+            &owner_a,
+            &recipient,
+            &token_client.address,
+            &1_000_000_i128,
+            &3_600_u64,
+            &NOW,
+            &(NOW + 86_400),
+            &0_u64,
+            &10_000_000_i128,
+            &RecurringKind::FixedAmountPerPeriod,
+            &str(&env, "Pre-fill schedule"),
+            &DEADLINE,
+            &ProposalCategory::Ops,
+        );
+        client.approve(&owner_a, &id);
+        client.approve(&owner_b, &id);
+        client.execute(&owner_c, &id);
+    }
+
+    assert_eq!(client.get_active_recurring_count(), 19);
+
+    let prop1 = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Concurrent proposal 1"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    let prop2 = client.create_recurring_proposal(
+        &owner_a,
+        &recipient,
+        &token_client.address,
+        &1_000_000_i128,
+        &3_600_u64,
+        &NOW,
+        &(NOW + 86_400),
+        &0_u64,
+        &10_000_000_i128,
+        &RecurringKind::FixedAmountPerPeriod,
+        &str(&env, "Concurrent proposal 2"),
+        &DEADLINE,
+        &ProposalCategory::Ops,
+    );
+
+    client.approve(&owner_a, &prop1);
+    client.approve(&owner_b, &prop1);
+
+    client.approve(&owner_a, &prop2);
+    client.approve(&owner_b, &prop2);
+
+    client.execute(&owner_c, &prop1);
+    assert_eq!(client.get_active_recurring_count(), 20);
+
+    assert_eq!(
+        client.try_execute(&owner_c, &prop2),
+        Err(Ok(ContractError::TooManyActiveRecurring))
+    );
+}
