@@ -7,6 +7,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { CreateProposalModal } from "./components/CreateProposalModal";
+import { CreateRecurringPaymentModal } from "./components/CreateRecurringPaymentModal";
 import { useContract } from "./hooks/useContract";
 import { useEventPolling } from "./hooks/useEventPolling";
 import { useNotifications } from "./hooks/useNotifications";
@@ -36,6 +37,7 @@ type OptimisticPatch = {
 
 export default function App() {
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateRecurring, setShowCreateRecurring] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
   const [txPending, setTxPending] = useState(false);
   const [isStale, setIsStale] = useState(false);
@@ -444,7 +446,7 @@ export default function App() {
                   onExecute={handleExecute}
                   onRevoke={handleRevoke}
                   onCreateProposal={() => setShowCreate(true)}
-                  createProposalButtonRef={newProposalButtonRef}
+                  onCreateRecurringPayment={() => setShowCreateRecurring(true)}
                   loading={loading}
                   error={error}
                 />
@@ -505,6 +507,13 @@ export default function App() {
           onClose={() => setShowCreate(false)}
           onSubmitted={refresh}
           triggerRef={newProposalButtonRef}
+        />
+      )}
+      {showCreateRecurring && (
+        <CreateRecurringPaymentModal
+          walletAddress={wallet.address}
+          onClose={() => setShowCreateRecurring(false)}
+          onSubmitted={refresh}
         />
       )}
     </div>

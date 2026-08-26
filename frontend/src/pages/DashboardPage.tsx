@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Repeat2 } from "lucide-react";
 import type { DashboardStat, Owner, Proposal } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import { StatCard } from "../components/StatCard";
@@ -15,8 +16,7 @@ type DashboardPageProps = {
   onExecute: (id: number) => void;
   onRevoke: (id: number) => void;
   onCreateProposal: () => void;
-  /** Ref forwarded from App.tsx to enable focus-return after modal close */
-  createProposalButtonRef?: RefObject<HTMLButtonElement | null>;
+  onCreateRecurringPayment: () => void;
   loading: boolean;
   error: string | null;
 };
@@ -30,7 +30,7 @@ export function DashboardPage({
   onExecute,
   onRevoke,
   onCreateProposal,
-  createProposalButtonRef,
+  onCreateRecurringPayment,
   loading,
   error,
 }: DashboardPageProps) {
@@ -126,9 +126,18 @@ export function DashboardPage({
             ref={createProposalButtonRef}
             type="button"
             onClick={onCreateProposal}
-            className="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
           >
-            + New
+            <Plus size={14} />
+            New
+          </button>
+          <button
+            type="button"
+            onClick={onCreateRecurringPayment}
+            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Repeat2 size={14} />
+            Recurring
           </button>
         </div>
       </div>
