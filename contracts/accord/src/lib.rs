@@ -168,7 +168,7 @@ pub struct Delegation {
     pub delegate: Address,
     pub weight: u32,
     /// Ledger timestamp (seconds) after which this delegation is no longer active.
-    pub expiry: u64,
+    pub expiry: Option<u64>,
 }
 
 /// A delegator's outgoing delegation alongside every delegation received
@@ -306,7 +306,7 @@ pub struct DelegationCreatedEvent {
     pub delegator: Address,
     pub delegate: Address,
     pub weight: u32,
-    pub expiry: u64,
+    pub expiry: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -722,7 +722,10 @@ fn remove_delegation(env: &Env, delegator: &Address) {
 }
 
 fn is_delegation_active(env: &Env, delegation: &Delegation) -> bool {
-    delegation.expiry > env.ledger().timestamp()
+    match delegation.expiry {
+        Some(expiry) => expiry > env.ledger().timestamp(),
+        None => true,
+    }
 }
 
 /// Computes `owner`'s effective weight given their already-known raw weight:
@@ -1967,44 +1970,41 @@ impl AccordContract {
 
     // ─── Delegation ───────────────────────────────────────────────────────────
 
-    /// Delegates up to `weight` of the caller's own voting weight to another
-    /// owner until `expiry` (a ledger timestamp in seconds). Replaces any
-    /// existing outgoing delegation from `delegator`. Both addresses must be
-    /// current owners, and the caller must authorize the call itself.
-    pub fn create_delegation(
+    /// Delegates the owner's entire voting weight to another owner, optional expiry.
+    /// Replaces any existing outgoing delegation from `owner`. Both addresses must be
+    /// current owners, and the caller must authorize the call.
+    pub fn delegate(
         env: Env,
-        delegator: Address,
+        owner: Address,
         delegate: Address,
-        weight: u32,
-        expiry: u64,
+        expiry: Option<u64>,
     ) -> Result<(), ContractError> {
         require_not_frozen(&env)?;
-        delegator.require_auth();
+        owner.require_auth();
 
-        if delegator == delegate {
+        if owner == delegate {
             return Err(ContractError::SelfDelegation);
         }
 
         let owners = read_owners_map(&env)?;
-        let delegator_weight = owners
-            .get(delegator.clone())
+        let owner_weight = owners
+            .get(owner.clone())
             .ok_or(ContractError::Unauthorized)?;
+
         if !owners.contains_key(delegate.clone()) {
             return Err(ContractError::OwnerNotFound);
         }
 
-        if weight == 0 || weight > delegator_weight {
-            return Err(ContractError::InvalidWeight);
-        }
-
-        if expiry <= env.ledger().timestamp() {
-            return Err(ContractError::InvalidExpiry);
+        if let Some(exp) = expiry {
+            if exp <= env.ledger().timestamp() {
+                return Err(ContractError::InvalidExpiry);
+            }
         }
 
         let delegation = Delegation {
-            delegator: delegator.clone(),
+            delegator: owner.clone(),
             delegate: delegate.clone(),
-            weight,
+            weight: owner_weight,
             expiry,
         };
         write_delegation(&env, &delegation);
@@ -2012,9 +2012,9 @@ impl AccordContract {
         env.events().publish(
             (symbol_short!("del_new"),),
             DelegationCreatedEvent {
-                delegator,
+                delegator: owner,
                 delegate,
-                weight,
+                weight: owner_weight,
                 expiry,
             },
         );
@@ -2022,18 +2022,19 @@ impl AccordContract {
         Ok(())
     }
 
-    /// Revokes the caller's outgoing delegation, if any.
-    pub fn revoke_delegation(env: Env, delegator: Address) -> Result<(), ContractError> {
-        delegator.require_auth();
+    /// Revokes the owner's outgoing delegation, if any, and returns weight to the owner.
+    pub fn undelegate(env: Env, owner: Address) -> Result<(), ContractError> {
+        require_not_frozen(&env)?;
+        owner.require_auth();
 
         let delegation =
-            read_delegation(&env, &delegator).ok_or(ContractError::DelegationNotFound)?;
-        remove_delegation(&env, &delegator);
+            read_delegation(&env, &owner).ok_or(ContractError::DelegationNotFound)?;
+        remove_delegation(&env, &owner);
 
         env.events().publish(
             (symbol_short!("del_rvk"),),
             DelegationRevokedEvent {
-                delegator,
+                delegator: owner,
                 delegate: delegation.delegate,
                 weight: delegation.weight,
             },
