@@ -15,6 +15,9 @@ import type {
   ProposalEventType,
   ProposalKind,
   ProposalStatus,
+  RecurringKind,
+  RecurringPayment,
+  RecurringStatus,
 } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
@@ -352,6 +355,86 @@ export async function getProposalsPaged(
   ]);
   const result = scValToNative(val);
   return Array.isArray(result) ? result : [];
+}
+
+function mapRecurringStatus(raw: unknown): RecurringStatus {
+  if (typeof raw === "string") return raw.toLowerCase() as RecurringStatus;
+  if (raw && typeof raw === "object") {
+    const key = Object.keys(raw as object)[0] ?? "Active";
+    return key.toLowerCase() as RecurringStatus;
+  }
+  return "active";
+}
+
+function mapRecurringKind(raw: unknown): RecurringKind {
+  let key: string;
+  if (typeof raw === "string") {
+    key = raw;
+  } else if (raw && typeof raw === "object") {
+    key = Object.keys(raw as object)[0] ?? "FixedAmountPerPeriod";
+  } else {
+    key = "FixedAmountPerPeriod";
+  }
+  return key.toLowerCase() === "linearvesting" ? "linear_vesting" : "fixed_amount_per_period";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRecurringPayment(raw: any): RecurringPayment {
+  const endTime = Number(raw.end_time ?? 0);
+  const cliffTime = Number(raw.cliff_time ?? 0);
+  const totalCap = safeBigInt(raw.total_cap);
+
+  return {
+    id: Number(raw.id),
+    proposer: shortenAddr(String(raw.proposer)),
+    recipient: shortenAddr(String(raw.recipient)),
+    token: shortenAddr(String(raw.token)),
+    amount: stroopsToDisplay(safeBigInt(raw.amount)),
+    intervalSecs: Number(raw.interval_secs ?? 0),
+    startTime: Number(raw.start_time ?? 0),
+    endTime: endTime > 0 ? endTime : undefined,
+    cliffTime: cliffTime > 0 ? cliffTime : undefined,
+    totalCap: totalCap > 0n ? stroopsToDisplay(totalCap) : undefined,
+    totalDisbursed: stroopsToDisplay(safeBigInt(raw.total_disbursed)),
+    lastDisbursedAt: Number(raw.last_disbursed_at ?? 0),
+    status: mapRecurringStatus(raw.status),
+    kind: mapRecurringKind(raw.kind),
+    category: mapCategory(raw.category),
+    description: String(raw.description ?? ""),
+  };
+}
+
+export async function getRecurringPayment(id: number): Promise<RecurringPayment> {
+  const val = await simulateView("get_recurring_payment", [
+    nativeToScVal(BigInt(id), { type: "u64" }),
+  ]);
+  return mapRecurringPayment(scValToNative(val));
+}
+
+export async function getRecurringPaymentsPaged(
+  offset: number,
+  limit: number
+): Promise<RecurringPayment[]> {
+  const val = await simulateView("get_recurring_payments_paged", [
+    nativeToScVal(BigInt(offset), { type: "u64" }),
+    nativeToScVal(limit, { type: "u32" }),
+  ]);
+  const result = scValToNative(val);
+  return Array.isArray(result) ? result.map(mapRecurringPayment) : [];
+}
+
+export async function getClaimableAmount(id: number): Promise<bigint> {
+  const val = await simulateView("get_claimable_amount", [
+    nativeToScVal(BigInt(id), { type: "u64" }),
+  ]);
+  return safeBigInt(scValToNative(val));
+}
+
+export async function getNextDisbursementTime(id: number): Promise<number> {
+  const val = await simulateView("get_next_disbursement_time", [
+    nativeToScVal(BigInt(id), { type: "u64" }),
+  ]);
+  return Number(scValToNative(val));
 }
 
 export async function getProposal(id: number): Promise<Proposal> {
