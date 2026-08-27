@@ -562,6 +562,66 @@ export async function createRecurringPaymentProposal(
   ]);
 }
 
+export async function createPauseRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_pause_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createResumeRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_resume_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createCancelRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_cancel_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createModifyRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  newAmount: bigint | null,
+  newIntervalSecs: bigint | null,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_modify_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    optionalI128ScVal(newAmount),
+    optionalU64ScVal(newIntervalSecs),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
 // ─── Governance proposal creation ────────────────────────────────────────────
 
 export async function createAddOwnerProposal(

@@ -437,6 +437,17 @@ export async function getNextDisbursementTime(id: number): Promise<number> {
   return Number(scValToNative(val));
 }
 
+// The lifecycle proposals below submit signed transactions, so the actual
+// transaction-building logic lives in submit.ts; these are thin wrappers so
+// callers can reach recurring-payment governance from contract.ts too.
+export {
+  createRecurringPaymentProposal,
+  createPauseRecurringProposal,
+  createResumeRecurringProposal,
+  createCancelRecurringProposal,
+  createModifyRecurringProposal,
+} from "./submit";
+
 export async function getProposal(id: number): Promise<Proposal> {
   const [val, thresh] = await Promise.all([
     simulateView("get_proposal", [
