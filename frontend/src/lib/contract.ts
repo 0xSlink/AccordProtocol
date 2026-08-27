@@ -873,3 +873,13 @@ export function computeMonthlyOutflow(schedules: RecurringSchedule[]): number {
   return total;
 }
 
+export async function getDueRecurring(): Promise<RecurringSchedule[]> {
+  const schedules = await getRecurringPayments();
+  const now = Date.now();
+  return schedules.filter((s) => {
+    if (s.status !== "active") return false;
+    if (s.nextDisbursementTs !== undefined) return now >= s.nextDisbursementTs;
+    return true;
+  });
+}
+
