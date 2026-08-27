@@ -370,6 +370,16 @@ export async function revokeProposal(
   ]);
 }
 
+export async function disburseRecurring(
+  callerAddress: string,
+  scheduleId: number
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "disburse_recurring", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+  ]);
+}
+
 export async function createProposal(
   callerAddress: string,
   to: string,
@@ -559,6 +569,66 @@ export async function createRecurringPaymentProposal(
     optionalU64ScVal(endTs),
     optionalI128ScVal(cap),
     proposalCategoryScVal(category),
+  ]);
+}
+
+export async function createPauseRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_pause_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createResumeRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_resume_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createCancelRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_cancel_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
+  ]);
+}
+
+export async function createModifyRecurringProposal(
+  callerAddress: string,
+  scheduleId: number,
+  newAmount: bigint | null,
+  newIntervalSecs: bigint | null,
+  description: string,
+  deadlineTs: bigint
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "create_modify_recurring_proposal", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+    optionalI128ScVal(newAmount),
+    optionalU64ScVal(newIntervalSecs),
+    xdr.ScVal.scvString(description),
+    nativeToScVal(deadlineTs, { type: "u64" }),
   ]);
 }
 

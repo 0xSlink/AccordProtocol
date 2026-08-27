@@ -8,7 +8,8 @@ export type ProposalKind =
   | "remove_owner"
   | "change_threshold"
   | "set_spending_limit"
-  | "change_owner_weight";
+  | "change_owner_weight"
+  | "recurring";
 
 export type Proposal = {
   id: number;
@@ -70,6 +71,29 @@ export type ProposalEvent = {
   token?: string;
   recipient?: string;
   details?: string;
+};
+
+export type RecurringStatus = "active" | "paused" | "completed" | "cancelled";
+
+export type RecurringKind = "fixed_amount_per_period" | "linear_vesting";
+
+export type RecurringPayment = {
+  id: number;
+  proposer: string;
+  recipient: string;
+  token: string;
+  amount: string;
+  intervalSecs: number;
+  startTime: number;
+  endTime?: number;
+  cliffTime?: number;
+  totalCap?: string;
+  totalDisbursed: string;
+  lastDisbursedAt: number;
+  status: RecurringStatus;
+  kind: RecurringKind;
+  category: ProposalCategory;
+  description: string;
 };
 
 export type RecurringScheduleStatus = "active" | "paused" | "completed" | "cancelled";
