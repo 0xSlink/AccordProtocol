@@ -546,7 +546,8 @@ export async function createRecurringPaymentProposal(
   cliffTs: bigint | null,
   endTs: bigint | null,
   cap: bigint | null,
-  category: ProposalCategory
+  category: ProposalCategory,
+  kind: "FixedAmountPerPeriod" | "LinearVesting" = "FixedAmountPerPeriod"
 ): Promise<void> {
   await buildAndSubmit(callerAddress, "create_recurring_payment", [
     nativeToScVal(callerAddress, { type: "address" }),
@@ -559,6 +560,7 @@ export async function createRecurringPaymentProposal(
     optionalU64ScVal(endTs),
     optionalI128ScVal(cap),
     proposalCategoryScVal(category),
+    xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(kind)]),
   ]);
 }
 
