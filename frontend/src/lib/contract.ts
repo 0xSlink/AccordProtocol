@@ -15,6 +15,7 @@ import type {
   ProposalEventType,
   ProposalKind,
   ProposalStatus,
+  RecurringSchedule,
 } from "../types/accord";
 import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
 
@@ -787,5 +788,88 @@ export async function getProposalEvents(proposalId: number): Promise<ProposalEve
     console.error(`Failed to fetch events for proposal #${proposalId}:`, err);
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Recurring payments
+// ---------------------------------------------------------------------------
+
+function mapRecurringSchedule(raw: unknown): RecurringSchedule | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+
+  const id = Number(obj.id ?? obj.schedule_id ?? obj.schedule_number ?? 0);
+  if (!id) return null;
+
+  const rawStatus = String(obj.status ?? "active").toLowerCase();
+  const status: RecurringSchedule["status"] =
+    rawStatus === "paused" || rawStatus === "completed" || rawStatus === "cancelled"
+      ? rawStatus
+      : "active";
+
+  const rawAmount = obj.amount ?? obj.amount_per_period ?? obj.payment_amount ?? 0n;
+  let amountDisplay: string;
+  if (typeof rawAmount === "bigint") {
+    amountDisplay = stroopsToDisplay(rawAmount);
+  } else if (typeof rawAmount === "number") {
+    amountDisplay = rawAmount >= 10_000_000 ? stroopsToDisplay(BigInt(Math.round(rawAmount))) : String(rawAmount);
+  } else {
+    amountDisplay = String(rawAmount);
+  }
+
+  const interval = obj.interval ?? obj.interval_secs ?? obj.cadence_secs;
+  const intervalNum = interval !== undefined ? Number(interval) : undefined;
+
+  const recipient = String(obj.recipient ?? obj.to ?? "");
+  const token = obj.token ? shortenAddr(String(obj.token)) : undefined;
+  const totalDisbursed = obj.total_disbursed !== undefined ? stroopsToDisplay(safeBigInt(obj.total_disbursed)) : "0";
+  const cap = obj.cap !== undefined ? stroopsToDisplay(safeBigInt(obj.cap)) : undefined;
+  const nextDisbursementTs = obj.next_disbursement_ts !== undefined ? Number(safeBigInt(obj.next_disbursement_ts)) * 1000 : undefined;
+  const description = obj.description ? String(obj.description) : undefined;
+  const cliff = obj.cliff !== undefined ? Number(safeBigInt(obj.cliff)) : undefined;
+  const endDate = obj.end_date !== undefined ? Number(safeBigInt(obj.end_date)) : undefined;
+
+  return {
+    id,
+    recipient,
+    amount: amountDisplay,
+    token,
+    cadence: obj.cadence ? String(obj.cadence) : undefined,
+    interval: intervalNum,
+    totalDisbursed,
+    status,
+    cliff,
+    endDate,
+    cap,
+    nextDisbursementTs,
+    description,
+  };
+}
+
+export async function getRecurringPayments(): Promise<RecurringSchedule[]> {
+  try {
+    const val = await simulateView("get_recurring_payments");
+    const raw = scValToNative(val);
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapRecurringSchedule).filter((s): s is RecurringSchedule => s !== null);
+  } catch {
+    return [];
+  }
+}
+
+const SECONDS_PER_MONTH = 2_629_743;
+
+export function computeMonthlyOutflow(schedules: RecurringSchedule[]): number {
+  let total = 0;
+  for (const s of schedules) {
+    if (s.status !== "active") continue;
+    const amountNum = Number.parseFloat(s.amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) continue;
+    const intervalSecs = s.interval ?? 0;
+    if (intervalSecs <= 0) continue;
+    const periodsPerMonth = SECONDS_PER_MONTH / intervalSecs;
+    total += amountNum * periodsPerMonth;
+  }
+  return total;
 }
 
