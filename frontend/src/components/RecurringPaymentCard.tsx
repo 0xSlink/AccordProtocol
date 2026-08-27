@@ -180,6 +180,30 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
     (schedule.interval !== undefined ? formatInterval(schedule.interval) : "—");
 
   return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-700" aria-label={`Recurring payment schedule ${schedule.id}, ${badge.label}, ${schedule.amount} ${schedule.token ?? ""}`}>
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-mono text-xs text-zinc-500">
+              Schedule #{schedule.id}
+            </span>
+            <span
+              className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${badge.style}`}
+              role="status"
+              aria-label={`Status: ${badge.label}`}
+            >
+              {badge.label}
+            </span>
+          </div>
+          <h3 className="text-base font-semibold text-white">
+            {schedule.amount} {schedule.token ? schedule.token : ""}
+          </h3>
+          <p className="font-mono text-sm text-zinc-400 mt-0.5">
+            Recipient: {shortenAddr(schedule.recipient)}
+          </p>
+        </div>
+
+        <div className="text-right text-xs text-zinc-500 space-y-1">
     <>
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-700">
         {/* Header row */}
@@ -222,6 +246,33 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
           <p className="text-xs text-zinc-500 mb-3 leading-relaxed">{schedule.description}</p>
         )}
 
+      {/* Action buttons based on status */}
+      <div className="flex items-center justify-between border-t border-zinc-800/60 pt-3 mt-3">
+        <div className="text-xs text-zinc-500" aria-live="polite">
+          {schedule.status === "active" &&
+            (due ? (
+              <span className="text-emerald-400">Payment is due</span>
+            ) : (
+              <span className="text-zinc-400">Next payment pending</span>
+            ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {schedule.status === "active" && (
+            <>
+              <div title={due ? undefined : "Next disbursement not yet due"}>
+                <button
+                  type="button"
+                  onClick={handleDisburse}
+                  disabled={!due}
+                  aria-label={
+                    due ? `Disburse schedule ${schedule.id} now` : "Next disbursement not yet due"
+                  }
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                >
+                  Disburse now
+                </button>
+              </div>
         {/* Progress bar toward cap */}
         {schedule.cap && (
           <ProgressBar disbursed={schedule.totalDisbursed} cap={schedule.cap} />
@@ -289,6 +340,9 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
                 {connected && (
                   <button
                     type="button"
+                    onClick={handlePause}
+                    aria-label={`Pause schedule ${schedule.id}`}
+                    className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-yellow-400 hover:bg-zinc-700 hover:text-yellow-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
                     onClick={handleResume}
                     aria-label="Resume schedule"
                     className="rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-500 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
@@ -300,11 +354,48 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
                   <button
                     type="button"
                     onClick={handleCancel}
-                    aria-label="Cancel schedule"
+                    aria-label={`Cancel schedule ${schedule.id}`}
                     className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
                   >
                     Cancel
                   </button>
+                </>
+              )}
+            </>
+          )}
+
+          {schedule.status === "paused" && (
+            <>
+              <button
+                type="button"
+                onClick={handleResume}
+                aria-label={`Resume schedule ${schedule.id}`}
+                className="rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-500 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              >
+                Resume
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                aria-label={`Cancel schedule ${schedule.id}`}
+                className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+
+          {schedule.status === "completed" && (
+            <span className="text-xs text-zinc-500 italic" role="status">
+              Schedule completed
+            </span>
+          )}
+
+          {schedule.status === "cancelled" && (
+            <span className="text-xs text-zinc-500 italic" role="status">
+              Schedule cancelled
+            </span>
+          )}
                 )}
               </>
             )}

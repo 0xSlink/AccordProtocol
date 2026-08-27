@@ -12,12 +12,15 @@ const TOKEN_ADDRESSES: Record<string, string> = {
 
 const CATEGORY_OPTIONS: ProposalCategory[] = ["Payroll", "Grant", "Ops", "Transfer", "Other"];
 
+const FOCUSABLE_SELECTORS =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 type RecurringKind = "FixedAmountPerPeriod" | "LinearVesting";
 
 type Props = {
   walletAddress: string | null;
   onClose: () => void;
   onSubmitted: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 };
 
 function truncateAddress(address: string | null) {
@@ -31,6 +34,7 @@ function toUnixSeconds(dateValue: string): bigint | null {
   return BigInt(Math.floor(ts / 1000));
 }
 
+export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitted, triggerRef }: Props) {
 // ─── Live Schedule Preview ────────────────────────────────────────────────────
 
 type PreviewProps = {
@@ -160,24 +164,56 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const recipientInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
 
+  // Focus trap + initial focus + restore on unmount
   useEffect(() => {
     const previousActiveElement = document.activeElement as HTMLElement | null;
-    recipientInputRef.current?.focus();
+    const currentTrigger = triggerRef?.current;
+    if (firstInputRef.current) {
+      firstInputRef.current.focus();
+    }
+
+    const modal = modalRef.current;
+    if (!modal) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS),
+      ).filter((el) => !el.closest('[aria-hidden="true"]'));
+
+      if (focusable.length === 0) { e.preventDefault(); return; }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
       if (e.key === "Escape") onClose();
     };
-    window.addEventListener("keydown", handleKeyDown);
+
+    modal.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      if (previousActiveElement && typeof previousActiveElement.focus === "function") {
+      modal.removeEventListener("keydown", handleKeyDown);
+      if (currentTrigger && typeof currentTrigger.focus === "function") {
+        currentTrigger.focus();
+      } else if (previousActiveElement && typeof previousActiveElement.focus === "function") {
         previousActiveElement.focus();
       }
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   const intervalSecs = Number.parseInt(interval, 10);
   const intervalSecsValid = Number.isFinite(intervalSecs) && intervalSecs >= 1;
@@ -271,6 +307,21 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
   }
 
   return (
+    <>
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+      />
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recurring-modal-title"
+        className="fixed inset-0 flex items-center justify-center z-50 p-4"
+      >
+        <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-lg">
+          <div className="flex items-center justify-between mb-6">
+          <h2 id="recurring-modal-title" className="text-white font-semibold text-lg">Create Recurring Payment</h2>
     <div
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
       className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
@@ -281,6 +332,7 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close modal"
             className="text-zinc-500 hover:text-zinc-300 text-xl focus:ring-2 focus:ring-zinc-400 focus:outline-none rounded-md"
           >
             ✕
@@ -332,41 +384,50 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
             </div>
           </div>
 
+           <div>
+            <label htmlFor="recurring-recipient" className="text-xs text-zinc-400 block mb-1.5">Recipient Address</label>
           {/* ── Recipient ── */}
           <div>
             <label className="text-xs text-zinc-400 block mb-1.5">Recipient Address</label>
             <input
-              ref={recipientInputRef}
+              id="recurring-recipient"
+              ref={firstInputRef}
               value={recipient}
               onChange={(e) => { setRecipient(e.target.value); setRecipientTouched(true); }}
               onBlur={() => setRecipientTouched(true)}
               placeholder="G..."
+              aria-label="Recipient Stellar address"
+              aria-invalid={recipientTouched && !StrKey.isValidEd25519PublicKey(recipient.trim())}
+              aria-describedby={recipientTouched && !StrKey.isValidEd25519PublicKey(recipient.trim()) ? "recurring-recipient-error" : undefined}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-mono placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
             />
             {recipientTouched && !StrKey.isValidEd25519PublicKey(recipient.trim()) && (
-              <p className="text-xs text-red-400 mt-1">Enter a valid Stellar address.</p>
+              <p id="recurring-recipient-error" className="text-xs text-red-400 mt-1" role="alert">Enter a valid Stellar address.</p>
             )}
           </div>
 
           {/* ── Amount + Token ── */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
+              <label htmlFor="recurring-amount" className="text-xs text-zinc-400 block mb-1.5">Amount</label>
               <label className="text-xs text-zinc-400 block mb-1.5">
                 {kind === "LinearVesting" ? "Total cap (vesting amount)" : "Amount per period"}
               </label>
               <input
+                id="recurring-amount"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
                 type="number"
                 min="0"
                 step="any"
+                aria-label="Payment amount"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
             <div>
               <label className="text-xs text-zinc-400 block mb-1.5">Token</label>
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-1" role="group" aria-label="Select token">
                 {(["XLM", "USDC", "EURC"] as const).map((symbol) => {
                   const active = token === symbol;
                   return (
@@ -375,6 +436,7 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
                       type="button"
                       onClick={() => setToken(symbol)}
                       aria-pressed={active}
+                      aria-label={`Select ${symbol} token`}
                       className={`rounded-lg border px-1.5 py-2 text-xs font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none ${
                         active
                           ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
@@ -392,13 +454,15 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
           {/* ── Interval + Category ── */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Interval (seconds)</label>
+              <label htmlFor="recurring-interval" className="text-xs text-zinc-400 block mb-1.5">Interval (seconds)</label>
               <input
+                id="recurring-interval"
                 value={interval}
                 onChange={(e) => setInterval(e.target.value)}
                 placeholder="2592000"
                 type="number"
                 min="1"
+                aria-label="Payment interval in seconds"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
               {intervalSecsValid && (
@@ -406,10 +470,12 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
               )}
             </div>
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Category</label>
+              <label htmlFor="recurring-category" className="text-xs text-zinc-400 block mb-1.5">Category</label>
               <select
+                id="recurring-category"
                 value={category}
                 onChange={(e) => setCategory(e.target.value as ProposalCategory)}
+                aria-label="Payment category"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               >
                 {CATEGORY_OPTIONS.map((option) => (
@@ -422,36 +488,62 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
           {/* ── Dates ── */}
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Start</label>
+              <label htmlFor="recurring-start" className="text-xs text-zinc-400 block mb-1.5">Start</label>
               <input
+                id="recurring-start"
                 type="date"
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
+                aria-label="Payment start date"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400 block mb-1.5">Cliff</label>
+              <label htmlFor="recurring-cliff" className="text-xs text-zinc-400 block mb-1.5">Cliff</label>
               <input
+                id="recurring-cliff"
                 type="date"
                 value={cliff}
                 onChange={(e) => setCliff(e.target.value)}
+                aria-label="Payment cliff date"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
             <div>
+              <label htmlFor="recurring-end" className="text-xs text-zinc-400 block mb-1.5">End</label>
               <label className="text-xs text-zinc-400 block mb-1.5">
                 End{kind === "LinearVesting" && <span className="text-red-400 ml-0.5">*</span>}
               </label>
               <input
+                id="recurring-end"
                 type="date"
                 value={end}
                 onChange={(e) => setEnd(e.target.value)}
+                aria-label="Payment end date"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
               />
             </div>
           </div>
 
+          <div>
+            <label htmlFor="recurring-cap" className="text-xs text-zinc-400 block mb-1.5">Cap</label>
+            <input
+              id="recurring-cap"
+              value={cap}
+              onChange={(e) => setCap(e.target.value)}
+              placeholder="Optional total cap"
+              type="number"
+              min="0"
+              step="any"
+              aria-label="Optional payment cap"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:ring-2 focus:ring-zinc-400 focus:outline-none focus:border-zinc-500"
+            />
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2" role="alert">
+              {error}
+            </p>
           {/* ── Cap (hidden for LinearVesting — amount IS the cap) ── */}
           {kind === "FixedAmountPerPeriod" && (
             <div>
@@ -487,6 +579,10 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
               type="button"
               onClick={handleSubmit}
               disabled={submitting || !walletAddress}
+              title={
+                walletAddress ? undefined : "Connect your Freighter wallet to submit"
+              }
+              aria-label={submitting ? "Submitting recurring payment" : "Create Recurring Payment"}
               title={walletAddress ? undefined : "Connect your Freighter wallet to submit"}
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2.5 rounded-lg font-medium transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
             >
@@ -495,6 +591,7 @@ export function CreateRecurringPaymentModal({ walletAddress, onClose, onSubmitte
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

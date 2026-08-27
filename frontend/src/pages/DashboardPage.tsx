@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Repeat2 } from "lucide-react";
-import type { DashboardStat, Owner, Proposal } from "../types/accord";
+import type { DashboardStat, Owner, Proposal, RecurringSchedule } from "../types/accord";
 import { ProposalCard } from "../components/ProposalCard";
 import { StatCard } from "../components/StatCard";
 import { ProposalCardSkeleton } from "../components/ProposalCardSkeleton";
 import { useOwnerWeights } from "../hooks/useOwnerWeights";
-import { getRequiredQuorumWeight } from "../lib/contract";
+import { getRequiredQuorumWeight, getDueRecurring } from "../lib/contract";
 
 type DashboardPageProps = {
   activeProposals: Proposal[];
@@ -17,6 +17,7 @@ type DashboardPageProps = {
   onRevoke: (id: number) => void;
   onCreateProposal: () => void;
   onCreateRecurringPayment: () => void;
+  recurringButtonRef?: React.RefObject<HTMLButtonElement | null>;
   loading: boolean;
   error: string | null;
 };
@@ -31,6 +32,7 @@ export function DashboardPage({
   onRevoke,
   onCreateProposal,
   onCreateRecurringPayment,
+  recurringButtonRef,
   loading,
   error,
 }: DashboardPageProps) {
@@ -38,6 +40,7 @@ export function DashboardPage({
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [sortByDeadline, setSortByDeadline] = useState(false);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [dueSchedules, setDueSchedules] = useState<RecurringSchedule[]>([]);
   const prevReadyCount = useRef(readyCount);
 
   const displayedProposals = [...activeProposals].sort((left, right) => {
@@ -63,6 +66,18 @@ export function DashboardPage({
   }, []);
 
   useEffect(() => {
+    let active = true;
+    getDueRecurring()
+      .then((schedules) => {
+        if (active) setDueSchedules(schedules);
+      })
+      .catch(() => {
+        /* noop */
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (readyCount > prevReadyCount.current) {
       setBannerDismissed(false);
     }
@@ -75,11 +90,57 @@ export function DashboardPage({
 
   return (
     <>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         {dashboardStats.map((s) => (
           <StatCard key={s.label} label={s.label} value={s.value} sub={s.sub} />
         ))}
       </div>
+
+      {dueSchedules.length > 0 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-6">
+          <h3 className="font-semibold text-sm mb-3">
+            Due for disbursement
+            <span className="ml-2 text-xs text-zinc-500 font-normal">
+              {dueSchedules.length} {dueSchedules.length === 1 ? "schedule" : "schedules"}
+            </span>
+          </h3>
+          <div className="space-y-2">
+            {dueSchedules.map((schedule) => (
+              <div
+                key={schedule.id}
+                className="flex items-center justify-between rounded-lg bg-zinc-800/50 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <span className="text-sm text-white font-medium">
+                    {schedule.amount} {schedule.token ?? ""}
+                  </span>
+                  <span className="text-xs text-zinc-500 ml-2">
+                    Schedule #{schedule.id}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Disburse schedule ${schedule.id} now`}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-zinc-400 shrink-0 ml-3"
+                >
+                  Disburse now
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dueSchedules.length === 0 && !loading && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-6">
+          <h3 className="font-semibold text-sm text-zinc-400 mb-1">
+            Due for disbursement
+          </h3>
+          <p className="text-xs text-zinc-600">
+            No schedules are currently due for disbursement.
+          </p>
+        </div>
+      )}
 
       {error && !loading && dismissedError !== error && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 mb-6 text-sm text-red-400 flex items-center justify-between">
@@ -132,9 +193,11 @@ export function DashboardPage({
             New
           </button>
           <button
+            ref={recurringButtonRef}
             type="button"
             onClick={onCreateRecurringPayment}
-            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
+            aria-label="Create recurring payment"
+            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
           >
             <Repeat2 size={14} />
             Recurring
