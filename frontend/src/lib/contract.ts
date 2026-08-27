@@ -446,6 +446,7 @@ export {
   createResumeRecurringProposal,
   createCancelRecurringProposal,
   createModifyRecurringProposal,
+  disburseRecurring,
 } from "./submit";
 
 export async function getProposal(id: number): Promise<Proposal> {

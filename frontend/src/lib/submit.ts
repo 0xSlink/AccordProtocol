@@ -370,6 +370,16 @@ export async function revokeProposal(
   ]);
 }
 
+export async function disburseRecurring(
+  callerAddress: string,
+  scheduleId: number
+): Promise<void> {
+  await buildAndSubmit(callerAddress, "disburse_recurring", [
+    nativeToScVal(callerAddress, { type: "address" }),
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+  ]);
+}
+
 export async function createProposal(
   callerAddress: string,
   to: string,
