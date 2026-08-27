@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { RecurringSchedule, RecurringScheduleStatus } from "../types/accord";
-import { formatInterval, shortenAddr, formatCountdown } from "../lib/soroban";
+import { formatInterval, shortenAddr, formatCountdown, stroopsToDisplay } from "../lib/soroban";
+import { getClaimableAmount } from "../lib/contract";
 import { useRecurringPayments } from "../hooks/useRecurringPayments";
 import {
   PauseRecurringModal,
@@ -85,6 +86,103 @@ function ProgressBar({ disbursed, cap }: { disbursed: string; cap: string }) {
       <div className="flex justify-between text-xs text-zinc-500 mt-1">
         <span>{disbursed} disbursed</span>
         <span>cap {cap}</span>
+      </div>
+    </div>
+  );
+}
+
+function VestingProgressBar({
+  scheduleId,
+  disbursed,
+  cap,
+}: {
+  scheduleId: number;
+  disbursed: string;
+  cap: string;
+}) {
+  const [claimable, setClaimable] = useState<string>("0");
+
+  useEffect(() => {
+    let cancelled = true;
+    (async () => {
+      try {
+        const raw = await getClaimableAmount(scheduleId);
+        if (!cancelled) setClaimable(stroopsToDisplay(raw));
+      } catch {
+        // silently ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [scheduleId]);
+
+  const parse = (v: string) => {
+    const n = Number.parseFloat(v.replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const claimed = parse(disbursed);
+  const claimableNum = parse(claimable);
+  const total = parse(cap);
+  const unvested = Math.max(0, total - claimed - claimableNum);
+
+  const claimedPct = total > 0 ? Math.min(100, (claimed / total) * 100) : 0;
+  const claimablePct = total > 0 ? Math.min(100 - claimedPct, (claimableNum / total) * 100) : 0;
+  const unvestedPct = Math.max(0, 100 - claimedPct - claimablePct);
+
+  return (
+    <div className="mt-2">
+      <div className="flex justify-between text-xs text-zinc-500 mb-1">
+        <span>Vesting progress</span>
+        <span className="text-zinc-300">{(claimedPct + claimablePct).toFixed(1)}%</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden flex">
+        {claimedPct > 0 && (
+          <div
+            className="h-full bg-emerald-500 transition-all duration-500"
+            style={{ width: `${claimedPct}%` }}
+            role="progressbar"
+            aria-valuenow={claimedPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${claimedPct.toFixed(1)}% claimed`}
+          />
+        )}
+        {claimablePct > 0 && (
+          <div
+            className="h-full bg-sky-500 transition-all duration-500"
+            style={{ width: `${claimablePct}%` }}
+            role="progressbar"
+            aria-valuenow={claimablePct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${claimablePct.toFixed(1)}% claimable`}
+          />
+        )}
+        {unvestedPct > 0 && (
+          <div
+            className="h-full bg-zinc-600 transition-all duration-500"
+            style={{ width: `${unvestedPct}%` }}
+            role="progressbar"
+            aria-valuenow={unvestedPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${unvestedPct.toFixed(1)}% unvested`}
+          />
+        )}
+      </div>
+      <div className="flex justify-between text-xs text-zinc-500 mt-1 gap-2">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+          {disbursed} claimed
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-sky-500" />
+          {claimable} claimable
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-zinc-600" />
+          {cap} total
+        </span>
       </div>
     </div>
   );
@@ -221,7 +319,14 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
       )}
 
       {/* Progress bar toward cap */}
-      {schedule.cap && (
+      {schedule.cap && schedule.kind === "linear_vesting" && (
+        <VestingProgressBar
+          scheduleId={schedule.id}
+          disbursed={schedule.totalDisbursed}
+          cap={schedule.cap}
+        />
+      )}
+      {schedule.cap && schedule.kind !== "linear_vesting" && (
         <ProgressBar disbursed={schedule.totalDisbursed} cap={schedule.cap} />
       )}
 
