@@ -47,6 +47,7 @@ export default function App() {
   );
   // Ref to return focus to the "+ New" trigger after modal closes (Task 4)
   const newProposalButtonRef = useRef<HTMLButtonElement>(null);
+  const recurringButtonRef = useRef<HTMLButtonElement>(null);
 
   const wallet = useWallet();
   const navigate = useNavigate();
@@ -89,6 +90,15 @@ export default function App() {
     }
     wasShowCreateRef.current = showCreate;
   }, [showCreate]);
+
+  // Return focus to the Recurring trigger when modal transitions from open → closed
+  const wasShowRecurringRef = useRef(false);
+  useEffect(() => {
+    if (!showCreateRecurring && wasShowRecurringRef.current) {
+      recurringButtonRef.current?.focus();
+    }
+    wasShowRecurringRef.current = showCreateRecurring;
+  }, [showCreateRecurring]);
 
   useEffect(() => {
     if (!wallet.address && txPending) {
@@ -447,6 +457,7 @@ export default function App() {
                   onRevoke={handleRevoke}
                   onCreateProposal={() => setShowCreate(true)}
                   onCreateRecurringPayment={() => setShowCreateRecurring(true)}
+                  recurringButtonRef={recurringButtonRef}
                   loading={loading}
                   error={error}
                 />
@@ -514,6 +525,7 @@ export default function App() {
           walletAddress={wallet.address}
           onClose={() => setShowCreateRecurring(false)}
           onSubmitted={refresh}
+          triggerRef={recurringButtonRef}
         />
       )}
     </div>

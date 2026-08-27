@@ -17,6 +17,7 @@ type DashboardPageProps = {
   onRevoke: (id: number) => void;
   onCreateProposal: () => void;
   onCreateRecurringPayment: () => void;
+  recurringButtonRef?: React.RefObject<HTMLButtonElement | null>;
   loading: boolean;
   error: string | null;
 };
@@ -31,6 +32,7 @@ export function DashboardPage({
   onRevoke,
   onCreateProposal,
   onCreateRecurringPayment,
+  recurringButtonRef,
   loading,
   error,
 }: DashboardPageProps) {
@@ -132,9 +134,11 @@ export function DashboardPage({
             New
           </button>
           <button
+            ref={recurringButtonRef}
             type="button"
             onClick={onCreateRecurringPayment}
-            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
+            aria-label="Create recurring payment"
+            className="inline-flex items-center gap-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-zinc-400 focus:outline-none"
           >
             <Repeat2 size={14} />
             Recurring
