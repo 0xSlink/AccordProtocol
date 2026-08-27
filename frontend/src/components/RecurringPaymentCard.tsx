@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { RecurringSchedule, RecurringScheduleStatus } from "../types/accord";
-import { formatInterval, shortenAddr } from "../lib/soroban";
+import { formatInterval, shortenAddr, formatCountdown } from "../lib/soroban";
 import { useRecurringPayments } from "../hooks/useRecurringPayments";
 import {
   PauseRecurringModal,
@@ -40,17 +40,6 @@ const STATUS_BADGES: Record<RecurringScheduleStatus, { label: string; style: str
   },
 };
 
-function formatCountdown(msUntil: number): string {
-  if (msUntil <= 0) return "Due now";
-  const totalSecs = Math.floor(msUntil / 1000);
-  const days = Math.floor(totalSecs / 86400);
-  const hours = Math.floor((totalSecs % 86400) / 3600);
-  const mins = Math.floor((totalSecs % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
-}
-
 function CountdownTicker({ targetMs }: { targetMs: number }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -62,7 +51,7 @@ function CountdownTicker({ targetMs }: { targetMs: number }) {
   const diff = targetMs - now;
   return (
     <span className={diff <= 0 ? "text-emerald-400" : "text-zinc-300"}>
-      {formatCountdown(diff)}
+      {formatCountdown(targetMs)}
     </span>
   );
 }
@@ -179,14 +168,22 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
     schedule.cadence ??
     (schedule.interval !== undefined ? formatInterval(schedule.interval) : "—");
 
+  const disburseTooltip = due
+    ? undefined
+    : schedule.nextDisbursementTs !== undefined
+    ? `Next disbursement ${formatCountdown(schedule.nextDisbursementTs)}`
+    : "Next disbursement not yet due";
+
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-700" aria-label={`Recurring payment schedule ${schedule.id}, ${badge.label}, ${schedule.amount} ${schedule.token ?? ""}`}>
+    <div
+      className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-700"
+      aria-label={`Recurring payment schedule ${schedule.id}, ${badge.label}, ${schedule.amount} ${schedule.token ?? ""}`}
+    >
+      {/* Header row */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-zinc-500">
-              Schedule #{schedule.id}
-            </span>
+            <span className="font-mono text-xs text-zinc-500">Schedule #{schedule.id}</span>
             <span
               className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${badge.style}`}
               role="status"
@@ -196,57 +193,39 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
             </span>
           </div>
           <h3 className="text-base font-semibold text-white">
-            {schedule.amount} {schedule.token ? schedule.token : ""}
+            {schedule.amount} {schedule.token ?? ""}
           </h3>
           <p className="font-mono text-sm text-zinc-400 mt-0.5">
             Recipient: {shortenAddr(schedule.recipient)}
           </p>
         </div>
 
-        <div className="text-right text-xs text-zinc-500 space-y-1">
-    <>
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition-colors hover:border-zinc-700">
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="text-right text-xs text-zinc-500 space-y-1 shrink-0">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono text-xs text-zinc-500">Schedule #{schedule.id}</span>
-              <span
-                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${badge.style}`}
-              >
-                {badge.label}
-              </span>
-            </div>
-            <h3 className="text-base font-semibold text-white">
-              {schedule.amount} {schedule.token ?? ""}
-            </h3>
-            <p className="font-mono text-sm text-zinc-400 mt-0.5">
-              Recipient: {shortenAddr(schedule.recipient)}
-            </p>
+            Cadence: <span className="text-zinc-300">{cadenceText}</span>
           </div>
-
-          <div className="text-right text-xs text-zinc-500 space-y-1 shrink-0">
-            <div>
-              Cadence: <span className="text-zinc-300">{cadenceText}</span>
-            </div>
-            <div>
-              Disbursed: <span className="text-zinc-300">{schedule.totalDisbursed}</span>
-            </div>
-            {schedule.nextDisbursementTs !== undefined && schedule.status === "active" && (
-              <div>
-                Next:{" "}
-                <CountdownTicker targetMs={schedule.nextDisbursementTs} />
-              </div>
-            )}
+          <div>
+            Disbursed: <span className="text-zinc-300">{schedule.totalDisbursed}</span>
           </div>
+          {schedule.nextDisbursementTs !== undefined && schedule.status === "active" && (
+            <div>
+              Next: <CountdownTicker targetMs={schedule.nextDisbursementTs} />
+            </div>
+          )}
         </div>
+      </div>
 
-        {/* Description */}
-        {schedule.description && (
-          <p className="text-xs text-zinc-500 mb-3 leading-relaxed">{schedule.description}</p>
-        )}
+      {/* Description */}
+      {schedule.description && (
+        <p className="text-xs text-zinc-500 mb-3 leading-relaxed">{schedule.description}</p>
+      )}
 
-      {/* Action buttons based on status */}
+      {/* Progress bar toward cap */}
+      {schedule.cap && (
+        <ProgressBar disbursed={schedule.totalDisbursed} cap={schedule.cap} />
+      )}
+
+      {/* Footer: status label + action buttons */}
       <div className="flex items-center justify-between border-t border-zinc-800/60 pt-3 mt-3">
         <div className="text-xs text-zinc-500" aria-live="polite">
           {schedule.status === "active" &&
@@ -257,10 +236,10 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
             ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {schedule.status === "active" && (
             <>
-              <div title={due ? undefined : "Next disbursement not yet due"}>
+              <div title={disburseTooltip}>
                 <button
                   type="button"
                   onClick={handleDisburse}
@@ -273,88 +252,29 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
                   Disburse now
                 </button>
               </div>
-        {/* Progress bar toward cap */}
-        {schedule.cap && (
-          <ProgressBar disbursed={schedule.totalDisbursed} cap={schedule.cap} />
-        )}
 
-        {/* Footer: status label + action buttons */}
-        <div className="flex items-center justify-between border-t border-zinc-800/60 pt-3 mt-3">
-          <div className="text-xs text-zinc-500">
-            {schedule.status === "active" &&
-              (due ? (
-                <span className="text-emerald-400">Payment is due</span>
-              ) : (
-                <span className="text-zinc-400">Next payment pending</span>
-              ))}
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {schedule.status === "active" && (
-              <>
-                <div title={due ? undefined : "Next disbursement not yet due"}>
+              {connected && (
+                <>
                   <button
                     type="button"
-                    onClick={handleDisburse}
-                    disabled={!due}
-                    aria-label={due ? "Disburse now" : "Next disbursement not yet due"}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                    onClick={handleModify}
+                    aria-label="Modify schedule"
+                    className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-sky-400 hover:bg-zinc-700 hover:text-sky-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
                   >
-                    Disburse now
+                    Modify
                   </button>
-                </div>
-
-                {connected && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleModify}
-                      aria-label="Modify schedule"
-                      className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-sky-400 hover:bg-zinc-700 hover:text-sky-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    >
-                      Modify
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePause}
-                      aria-label="Pause schedule"
-                      className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-yellow-400 hover:bg-zinc-700 hover:text-yellow-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    >
-                      Pause
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      aria-label="Cancel schedule"
-                      className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    >
-                      Cancel
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-
-            {schedule.status === "paused" && (
-              <>
-                {connected && (
                   <button
                     type="button"
                     onClick={handlePause}
-                    aria-label={`Pause schedule ${schedule.id}`}
+                    aria-label="Pause schedule"
                     className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-yellow-400 hover:bg-zinc-700 hover:text-yellow-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    onClick={handleResume}
-                    aria-label="Resume schedule"
-                    className="rounded-lg bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-500 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
                   >
-                    Resume
+                    Pause
                   </button>
-                )}
-                {connected && (
                   <button
                     type="button"
                     onClick={handleCancel}
-                    aria-label={`Cancel schedule ${schedule.id}`}
+                    aria-label="Cancel schedule"
                     className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
                   >
                     Cancel
@@ -374,14 +294,16 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
               >
                 Resume
               </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                aria-label={`Cancel schedule ${schedule.id}`}
-                className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              >
-                Cancel
-              </button>
+              {connected && (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  aria-label={`Cancel schedule ${schedule.id}`}
+                  className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-zinc-700 hover:text-rose-300 transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                >
+                  Cancel
+                </button>
+              )}
             </>
           )}
 
@@ -396,22 +318,10 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
               Schedule cancelled
             </span>
           )}
-                )}
-              </>
-            )}
-
-            {schedule.status === "completed" && (
-              <span className="text-xs text-zinc-500 italic">Schedule completed</span>
-            )}
-
-            {schedule.status === "cancelled" && (
-              <span className="text-xs text-zinc-500 italic">Schedule cancelled</span>
-            )}
-          </div>
         </div>
       </div>
 
-      {/* Governance-proposal modals — rendered outside the card so z-index stacks correctly */}
+      {/* Governance-proposal modals */}
       {activeModal === "pause" && connected && (
         <PauseRecurringModal
           scheduleId={schedule.id}
@@ -446,6 +356,6 @@ export const RecurringPaymentCard = React.memo(function RecurringPaymentCard({
           onSubmitted={handleModalSubmitted}
         />
       )}
-    </>
+    </div>
   );
 });
