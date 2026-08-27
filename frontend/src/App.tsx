@@ -19,11 +19,13 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OwnersPage } from "./pages/OwnersPage";
 import { ProposalDetailPage } from "./pages/ProposalDetailPage";
+import { RecurringPage } from "./pages/RecurringPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { Proposal } from "./types/accord";
 
 const NAV_ITEMS = [
   { label: "dashboard", to: "/app" },
+  { label: "recurring", to: "/app/recurring" },
   { label: "history", to: "/app/history" },
   { label: "owners", to: "/app/owners" },
   { label: "settings", to: "/app/settings" },
@@ -467,6 +469,12 @@ export default function App() {
               path="history"
               element={
                 <HistoryPage proposals={proposals} onApprove={handleApprove} />
+              }
+            />
+            <Route
+              path="recurring"
+              element={
+                <RecurringPage walletAddress={wallet.address} />
               }
             />
             <Route

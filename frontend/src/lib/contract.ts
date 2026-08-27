@@ -883,3 +883,29 @@ export async function getDueRecurring(): Promise<RecurringSchedule[]> {
   });
 }
 
+export async function getRecurringPaymentsPaged(
+  offset: number,
+  limit: number
+): Promise<RecurringSchedule[]> {
+  try {
+    const val = await simulateView("get_recurring_payments_paged", [
+      nativeToScVal(BigInt(offset), { type: "u64" }),
+      nativeToScVal(limit, { type: "u32" }),
+    ]);
+    const raw = scValToNative(val);
+    if (!Array.isArray(raw)) return [];
+    return raw.map(mapRecurringSchedule).filter((s): s is RecurringSchedule => s !== null);
+  } catch {
+    return [];
+  }
+}
+
+export async function getTotalRecurringPayments(): Promise<number> {
+  try {
+    const val = await simulateView("get_total_recurring_payments");
+    return Number(scValToNative(val));
+  } catch {
+    return 0;
+  }
+}
+
