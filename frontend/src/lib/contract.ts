@@ -15,11 +15,13 @@ import type {
   ProposalEventType,
   ProposalKind,
   ProposalStatus,
+  RecurringSchedule,
+  RecurringScheduleStatus,
   RecurringKind,
   RecurringPayment,
   RecurringStatus,
 } from "../types/accord";
-import { stroopsToDisplay, formatDeadline, shortenAddr } from "./soroban";
+import { stroopsToDisplay, formatDeadline, shortenAddr, formatInterval } from "./soroban";
 
 const RPC_URL = import.meta.env.VITE_SOROBAN_RPC_URL as string;
 const CONTRACT_ID = import.meta.env.VITE_CONTRACT_ADDRESS as string;
@@ -884,3 +886,96 @@ export async function getProposalEvents(proposalId: number): Promise<ProposalEve
   }
 }
 
+
+// ─── Recurring Payment read wrappers ────────────────────────────────────────
+
+function mapRecurringStatus(raw: unknown): RecurringScheduleStatus {
+  let key = "";
+  if (typeof raw === "string") {
+    key = raw.toLowerCase();
+  } else if (raw && typeof raw === "object") {
+    key = (Object.keys(raw as object)[0] ?? "").toLowerCase();
+  }
+  if (key === "paused") return "paused";
+  if (key === "completed") return "completed";
+  if (key === "cancelled" || key === "canceled") return "cancelled";
+  return "active";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRecurringSchedule(raw: any): RecurringSchedule {
+  const intervalSecs = Number(safeBigInt(raw.interval ?? raw.interval_secs ?? 0));
+  const amount = stroopsToDisplay(safeBigInt(raw.amount ?? 0));
+  const totalDisbursed = stroopsToDisplay(safeBigInt(raw.total_disbursed ?? 0));
+  const capRaw = raw.cap ?? (raw.total_cap != null && Number(safeBigInt(raw.total_cap)) > 0 ? raw.total_cap : null);
+  const cap = capRaw != null ? stroopsToDisplay(safeBigInt(capRaw)) : undefined;
+
+  // Compute next disbursement timestamp (ms) for countdown display.
+  const lastDisbursedAt = Number(safeBigInt(raw.last_disbursed_at ?? 0));
+  const periodsDisbursed = Number(raw.periods_disbursed ?? 0);
+  let nextDisbursementTs: number | undefined;
+  if (intervalSecs > 0) {
+    const startSecs = Number(safeBigInt(raw.start ?? raw.start_time ?? 0));
+    const cliffSecs =
+      raw.cliff != null && Number(safeBigInt(raw.cliff)) > 0
+        ? Number(safeBigInt(raw.cliff))
+        : raw.cliff_time != null && Number(safeBigInt(raw.cliff_time)) > 0
+        ? Number(safeBigInt(raw.cliff_time))
+        : undefined;
+
+    if (periodsDisbursed === 0) {
+      const firstAt = cliffSecs != null && cliffSecs > startSecs ? cliffSecs : startSecs;
+      nextDisbursementTs = firstAt * 1000;
+    } else if (lastDisbursedAt > 0) {
+      nextDisbursementTs = (lastDisbursedAt + intervalSecs) * 1000;
+    }
+  }
+
+  return {
+    id: Number(safeBigInt(raw.id ?? 0)),
+    recipient: String(raw.recipient ?? ""),
+    amount,
+    token: raw.token ? String(raw.token) : undefined,
+    cadence: intervalSecs > 0 ? formatInterval(intervalSecs) : undefined,
+    interval: intervalSecs > 0 ? intervalSecs : undefined,
+    totalDisbursed,
+    status: mapRecurringStatus(raw.status),
+    cliff:
+      raw.cliff != null && Number(safeBigInt(raw.cliff)) > 0
+        ? Number(safeBigInt(raw.cliff))
+        : raw.cliff_time != null && Number(safeBigInt(raw.cliff_time)) > 0
+        ? Number(safeBigInt(raw.cliff_time))
+        : undefined,
+    endDate:
+      raw.end != null && Number(safeBigInt(raw.end)) > 0
+        ? Number(safeBigInt(raw.end))
+        : raw.end_time != null && Number(safeBigInt(raw.end_time)) > 0
+        ? Number(safeBigInt(raw.end_time))
+        : undefined,
+    cap,
+    nextDisbursementTs,
+    description: raw.description ? String(raw.description) : undefined,
+  };
+}
+
+export async function getRecurringPayment(scheduleId: number): Promise<RecurringSchedule> {
+  const val = await simulateView("get_recurring_payment", [
+    nativeToScVal(BigInt(scheduleId), { type: "u64" }),
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return mapRecurringSchedule(scValToNative(val) as any);
+}
+
+export async function getRecurringPaymentsPaged(
+  offset: number,
+  limit: number
+): Promise<RecurringSchedule[]> {
+  const val = await simulateView("get_recurring_payments_paged", [
+    nativeToScVal(BigInt(offset), { type: "u64" }),
+    nativeToScVal(limit, { type: "u32" }),
+  ]);
+  const raw = scValToNative(val);
+  if (!Array.isArray(raw)) return [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (raw as any[]).map((item) => mapRecurringSchedule(item));
+}
